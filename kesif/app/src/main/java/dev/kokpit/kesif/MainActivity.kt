@@ -49,30 +49,10 @@ class MainActivity : Activity() {
             setBackgroundColor(bg)
             addView(root, MATCH_PARENT, WRAP_CONTENT)
         })
-        CanProbe.start(this)
         load()
     }
 
-    private var canCard: LinearLayout? = null
-    private val canTick = object : Runnable {
-        override fun run() {
-            canCard?.let { fillCan(it) }
-            main.postDelayed(this, 500)
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        main.post(canTick)
-    }
-
-    override fun onPause() {
-        main.removeCallbacks(canTick)
-        super.onPause()
-    }
-
     override fun onDestroy() {
-        CanProbe.stop(this)
         server?.stop()
         super.onDestroy()
     }
@@ -93,7 +73,7 @@ class MainActivity : Activity() {
         for (p in listOf(8080, 8090, 8765)) {
             val s = ReportServer(
                 p,
-                report = { CanProbe.attach(report ?: ReportBuilder.build(applicationContext)) },
+                report = { report ?: ReportBuilder.build(applicationContext) },
                 apks = { ReportBuilder.apkFiles(applicationContext) },
             )
             if (runCatching { s.start() }.isSuccess) { server = s; port = p; return }
@@ -117,16 +97,6 @@ class MainActivity : Activity() {
         startServer()
         root.removeAllViews()
         header()
-
-        // Live CAN
-        card {
-            addView(label("Canlı CAN", 24f, accent, bold = true))
-            addView(label("Kapıları tek tek aç-kapat, motoru çalıştır, klimayı değiştir. Değerler burada yarım saniyede bir yenilenir.", 17f, muted))
-            val body = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-            addView(body)
-            canCard = body
-            fillCan(body)
-        }
 
         // Summary
         card {
@@ -187,17 +157,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun fillCan(body: LinearLayout) {
-        body.removeAllViews()
-        CanProbe.lines().forEach { body.addView(row(it.label, it.value, 19f)) }
-        val log = CanProbe.changeLines().take(8)
-        body.addView(label("Son değişiklikler", 18f, accent, bold = true).apply { setPadding(0, dp(14), 0, 0) })
-        if (log.isEmpty()) body.addView(label("Henüz değişiklik yok", 16f, muted))
-        else log.forEach { body.addView(label("${it.label}  ${it.value}", 16f, text)) }
-    }
-
-    private fun save(r0: Report) {
-        val r = CanProbe.attach(r0)
+    private fun save(r: Report) {
         val name = "kokpit-kesif-${System.currentTimeMillis() / 1000}.txt"
         val where = runCatching {
             if (Build.VERSION.SDK_INT >= 29) {
