@@ -134,7 +134,7 @@ object ReportBuilder {
 
         val summary = listOf(
             Line("Cihaz", "${Build.MANUFACTURER} ${Build.MODEL}"),
-            Line("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"),
+            Line("Android", "${getprop("ro.build.version.release") ?: Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) · ekranda “${Build.VERSION.RELEASE}” yazıyor"),
             Line("İşlemci", listOfNotNull(soc, cpuHardware, Build.HARDWARE).distinct().joinToString(" · ")),
             Line("Çekirdek", "$cores × ${maxFreqs.maxOrNull()?.let { "%.1f GHz".format(it / 1_000_000.0) } ?: "?"}"),
             Line("Bellek", "${gb(mi.totalMem)} toplam · ${gb(mi.availMem)} boş"),
@@ -216,6 +216,22 @@ object ReportBuilder {
 
         val props = Section("Sistem özellikleri", readProps())
 
+        // Reality check: cheap units often report a fake Android version and fake RAM.
+        val realRelease = getprop("ro.build.version.release")
+        val memTotalKb = readFile("/proc/meminfo")?.lines()
+            ?.firstOrNull { it.startsWith("MemTotal") }
+            ?.filter { it.isDigit() }?.toLongOrNull()
+        val reality = Section(
+            "Gerçeklik kontrolü", listOf(
+                Line("Ekranda görünen Android", Build.VERSION.RELEASE),
+                Line("Sistemin kendi sürümü", realRelease ?: "-"),
+                Line("API düzeyi", "${Build.VERSION.SDK_INT} (27 = Android 8.1)"),
+                Line("Sürüm tutarlı mı", if (realRelease == null || realRelease == Build.VERSION.RELEASE) "evet" else "HAYIR · görünen sürüm sahte"),
+                Line("Bellek (sistem API)", gb(mi.totalMem)),
+                Line("Bellek (/proc/meminfo)", memTotalKb?.let { gb(it * 1024) } ?: "-"),
+            )
+        )
+
         // Apps
         @Suppress("DEPRECATION")
         val pkgs = runCatching { pm.getInstalledPackages(0) }.getOrDefault(emptyList())
@@ -242,8 +258,71 @@ object ReportBuilder {
             )
         )
 
-        return Report(now, summary, listOf(device, screen, cpu, home, settings, net, appSummary, props), apps)
+        return Report(
+            now, summary,
+            listOf(reality, device, screen, cpu, home, settings, net, appSummary) + components(ctx) + props,
+            apps,
+        )
     }
+
+    /** Packages whose inner screens and services we want to map. */
+    private val componentPrefixes = listOf(
+        "com.hcn.", "com.zjinnova.", "com.autochips.", "com.auto.", "com.android.launcher3",
+        "com.mediatek.engineermode", "com.adups.",
+    )
+
+    fun isTarget(pkg: String) = componentPrefixes.any { pkg.startsWith(it) } && !pkg.startsWith("com.hcn.auto.theme.")
+
+    /** Lists activities, services, receivers and providers of the vendor packages. */
+    private fun components(ctx: Context): List<Section> {
+        val pm = ctx.packageManager
+        @Suppress("DEPRECATION")
+        val targets = pm.getInstalledPackages(0).map { it.packageName }.filter(::isTarget).sorted()
+        return targets.map { pkg ->
+            val lines = mutableListOf<Line>()
+            fun add(kind: String, flag: Int, pick: (android.content.pm.PackageInfo) -> List<Line>) {
+                runCatching {
+                    @Suppress("DEPRECATION")
+                    pick(pm.getPackageInfo(pkg, flag))
+                }.onSuccess { lines += it }.onFailure { lines += Line(kind, "okunamadı") }
+            }
+            add("Ekranlar", PackageManager.GET_ACTIVITIES) { pi ->
+                pi.activities.orEmpty().map { Line("ekran", "${it.name}${if (it.exported) " · dışa açık" else ""}") }
+            }
+            add("Servisler", PackageManager.GET_SERVICES) { pi ->
+                pi.services.orEmpty().map { Line("servis", "${it.name}${if (it.exported) " · dışa açık" else ""}") }
+            }
+            add("Alıcılar", PackageManager.GET_RECEIVERS) { pi ->
+                pi.receivers.orEmpty().map { Line("alıcı", "${it.name}${if (it.exported) " · dışa açık" else ""}") }
+            }
+            add("Sağlayıcılar", PackageManager.GET_PROVIDERS) { pi ->
+                pi.providers.orEmpty().map { Line("sağlayıcı", "${it.name} · ${it.authority}") }
+            }
+            Section("Bileşenler · $pkg", lines.ifEmpty { listOf(Line("-", "bileşen yok")) })
+        }
+    }
+
+    data class ApkFile(val pkg: String, val label: String, val path: String, val bytes: Long)
+
+    /** APK files of the vendor packages, for offline study on the iPad. */
+    fun apkFiles(ctx: Context): List<ApkFile> {
+        val pm = ctx.packageManager
+        @Suppress("DEPRECATION")
+        return pm.getInstalledPackages(0).mapNotNull { p ->
+            val ai = p.applicationInfo ?: return@mapNotNull null
+            if (!isTarget(p.packageName)) return@mapNotNull null
+            val f = File(ai.sourceDir ?: return@mapNotNull null)
+            if (!f.canRead()) return@mapNotNull null
+            ApkFile(p.packageName, runCatching { pm.getApplicationLabel(ai).toString() }.getOrDefault(p.packageName), f.path, f.length())
+        }.sortedBy { it.pkg }
+    }
+
+    private fun getprop(key: String): String? = runCatching {
+        val p = Runtime.getRuntime().exec(arrayOf("getprop", key))
+        val out = p.inputStream.bufferedReader().readText().trim()
+        p.waitFor()
+        out.ifEmpty { null }
+    }.getOrNull()
 
     fun localIps(): List<Pair<String, String>> = runCatching {
         NetworkInterface.getNetworkInterfaces().toList()

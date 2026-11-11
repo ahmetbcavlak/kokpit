@@ -71,7 +71,11 @@ class MainActivity : Activity() {
     private fun startServer() {
         if (server != null) return
         for (p in listOf(8080, 8090, 8765)) {
-            val s = ReportServer(p) { report ?: ReportBuilder.build(applicationContext) }
+            val s = ReportServer(
+                p,
+                report = { report ?: ReportBuilder.build(applicationContext) },
+                apks = { ReportBuilder.apkFiles(applicationContext) },
+            )
             if (runCatching { s.start() }.isSuccess) { server = s; port = p; return }
         }
     }
@@ -115,6 +119,7 @@ class MainActivity : Activity() {
                     setImageBitmap(Qr.bitmap(url, size, Color.BLACK, Color.WHITE))
                 }, LinearLayout.LayoutParams(size, size).apply { gravity = Gravity.START })
                 if (ips.size > 1) addView(label("Diğer adresler: " + ips.drop(1).joinToString { "http://$it:$port" }, 16f, muted))
+                addView(label("Üretici uygulamalarının dosyaları: $url/apk", 18f, muted).apply { setPadding(0, dp(12), 0, 0) })
             }
         }
 
