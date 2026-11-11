@@ -4,7 +4,9 @@ Renault Mégane IV'teki dikey araç ekranı için kendi arayüzümüz.
 
 ## ⬇️ Kokpit Keşif'i indir
 
-**[▶ Kokpit Keşif'i indir (APK)](../../releases/latest/download/kokpit-kesif.apk)**
+**[▶ Kokpit Keşif'i indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-kesif.apk)**
+
+Sürüm: 0.1.0 · 77 KB
 
 Ekranın tarayıcısında bu sayfayı açıp yukarıdaki bağlantıya dokun. İnince "Yükle"ye dokun.
 İlk seferde "Bilinmeyen uygulamalar" izni istenirse tarayıcıya bir kez izin ver.
