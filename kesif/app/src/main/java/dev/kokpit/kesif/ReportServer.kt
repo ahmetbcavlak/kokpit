@@ -47,6 +47,7 @@ class ReportServer(
         val path = URLDecoder.decode(requestLine.split(" ").getOrNull(1) ?: "/", "UTF-8")
         val out = c.getOutputStream()
         when {
+            path.startsWith("/can.json") -> send(out, "application/json; charset=utf-8", CanProbe.json())
             path.startsWith("/rapor.txt") -> send(out, "text/plain; charset=utf-8", report().toText())
             path == "/apk" || path == "/apk/" -> send(out, "text/html; charset=utf-8", apkPage())
             path.startsWith("/apk/") && path.endsWith(".apk") -> {
@@ -99,6 +100,7 @@ li{margin:10px 0}
 <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('r').innerText).then(()=>this.textContent='Kopyalandı')">Raporu kopyala</button>
 <a class="btn" href="/rapor.txt" download="kokpit-kesif.txt">Dosya olarak indir</a>
 <a class="btn" href="/apk">Uygulama dosyaları</a>
+<a class="btn" href="/can.json">CAN (JSON)</a>
 <pre id="r">${esc(r.toText())}</pre>
 </body></html>
 """.trimIndent()
