@@ -41,6 +41,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // The clips are played from their file descriptor (openRawResourceFd): they must stay stored,
+    // not deflated. AAPT2 already stores .mp4 by default; this makes it explicit.
+    androidResources { noCompress += "mp4" }
+
     testOptions { unitTests.isIncludeAndroidResources = true }
 }
 

@@ -31,6 +31,17 @@ object PaketAcici {
     fun ac(ctx: Context, bilesen: ComponentName): Sonuc =
         baslat(ctx, Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(bilesen))
 
+    /**
+     * Opens a Settings page by its intent action (Settings.ACTION_ACCESSIBILITY_SETTINGS,
+     * ACTION_APPLICATION_DETAILS_SETTINGS with [paket] as data). Only an intent: the user changes
+     * the setting there; this app never writes a setting.
+     */
+    fun ayarAc(ctx: Context, eylem: String, paket: String? = null): Sonuc {
+        val niyet = Intent(eylem)
+        if (paket != null) niyet.data = android.net.Uri.fromParts("package", paket, null)
+        return baslat(ctx, niyet)
+    }
+
     private fun baslat(ctx: Context, intent: Intent): Sonuc {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {

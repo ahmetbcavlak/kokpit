@@ -22,11 +22,14 @@ import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.Yazi
 import dev.kokpit.anaekran.uygulama.Uygulama
 import dev.kokpit.anaekran.uygulama.UygulamaListesi
+import dev.kokpit.anaekran.veri.AracDurumu
 
 /**
  * Installed apps as a 4-column grid (a ListView of rows: view recycling and a footer without
- * AndroidX). Sorted by name, without Kokpit itself; a tap opens the app. The last row is the
- * small "Yazı tipi lisansları" link, which swaps the list for the OFL texts.
+ * AndroidX). Sorted by name, without Kokpit itself; a tap opens the app. Names appear first,
+ * icons when they are drawn (UygulamaListesi). The status line (time, outside temperature)
+ * is the same as on Y-5. The last row is the small "Yazı tipi lisansları" link, which swaps
+ * the list for the OFL texts.
  */
 class UygulamalarEkrani(context: Context, private val ac: (Uygulama) -> Unit) : EkranGorunumu {
 
@@ -37,6 +40,7 @@ class UygulamalarEkrani(context: Context, private val ac: (Uygulama) -> Unit) : 
     private var uygulamalar: List<Uygulama> = emptyList()
     private var yuklendi = false
 
+    private val satir: DurumSatiri
     private val baslik = context.metin(Yazi.sansOrta, 34, palet.tx, -0.015f).apply { setText(R.string.ekran_uygulamalar) }
     private val durum = context.metin(Yazi.sans, 16, palet.mu).apply { setText(R.string.yukleniyor) }
     private val geriDugmesi = context.metin(Yazi.sansOrta, 17, palet.tx).apply {
@@ -78,6 +82,7 @@ class UygulamalarEkrani(context: Context, private val ac: (Uygulama) -> Unit) : 
     }
 
     init {
+        satir = DurumSatiri(kok)
         kok.ekle(baslik, 40, 84)
         kok.ekle(durum, 40, 134)
         kok.ekle(geriDugmesi, 744, 76, 120, 76, MutlakDuzen.Hiza.SAG)
@@ -88,25 +93,32 @@ class UygulamalarEkrani(context: Context, private val ac: (Uygulama) -> Unit) : 
     override fun gosterildi() {
         lisansiKapat()
         // Fresh list each time (new installs show up); icons come from the per-app cache.
-        UygulamaListesi.yukle(gorunum.context, u(SIMGE)) { liste ->
-            uygulamalar = liste
-            yuklendi = true
-            durumuYaz()
-            satirAdaptoru.notifyDataSetChanged()
-        }
+        satir.saatiYaz()
+        UygulamaListesi.yukle(gorunum.context, u(SIMGE), ::listeGeldi, ::listeGeldi)
     }
+
+    private fun listeGeldi(liste: List<Uygulama>) {
+        uygulamalar = liste
+        yuklendi = true
+        durumuYaz()
+        satirAdaptoru.notifyDataSetChanged()
+    }
+
+    override fun veriDegisti(d: AracDurumu) = satir.veri(d)
+    override fun dakikaGecti() = satir.saatiYaz()
 
     private fun durumuYaz() {
         val c = gorunum.context
         durum.text = when {
             !yuklendi -> c.getString(R.string.yukleniyor)
             uygulamalar.isEmpty() -> c.getString(R.string.uygulama_yok)
-            else -> "${uygulamalar.size} uygulama"
+            else -> c.resources.getQuantityString(R.plurals.uygulama_sayisi, uygulamalar.size, uygulamalar.size)
         }
     }
 
     override fun temaDegisti(p: Palet) {
         palet = p
+        satir.tema(p)
         baslik.setTextColor(p.tx)
         durum.setTextColor(p.mu)
         geriDugmesi.setTextColor(p.tx)
@@ -121,7 +133,7 @@ class UygulamalarEkrani(context: Context, private val ac: (Uygulama) -> Unit) : 
         lisans.visibility = View.VISIBLE
         geriDugmesi.visibility = View.VISIBLE
         baslik.setText(R.string.lisanslar)
-        durum.text = "SIL Open Font License 1.1"
+        durum.setText(R.string.lisans_alt)
     }
 
     private fun lisansiKapat() {
@@ -203,10 +215,10 @@ class UygulamalarEkrani(context: Context, private val ac: (Uygulama) -> Unit) : 
         )
 
         fun lisansMetni(c: Context): String = buildString {
-            append("Bu uygulamadaki yazı tipleri Google Fonts'tan alındı, Latin alt kümesine indirildi ve SIL Open Font License 1.1 ile dağıtılıyor.\n\n")
+            append(c.getString(R.string.lisans_giris)).append("\n\n")
             for ((ad, yol) in LISANSLAR) {
                 append("— ").append(ad).append(" —\n\n")
-                append(runCatching { c.assets.open(yol).bufferedReader().use { it.readText() } }.getOrDefault("(lisans dosyası okunamadı)"))
+                append(runCatching { c.assets.open(yol).bufferedReader().use { it.readText() } }.getOrDefault(c.getString(R.string.lisans_okunamadi)))
                 append("\n\n")
             }
         }

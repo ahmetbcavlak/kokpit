@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- tools:keep: the car pictures (arac/), textures and font families are used from task 4 on;
-     keep them through release resource shrinking until then. -->
+<!-- tools:keep: the font family XMLs are not referenced from code (Yazi loads each TTF on its own,
+     see tema/Yazi.kt); keep them through release resource shrinking for the licence list.
+     Every scene picture is referenced from code (arayuz/SahneKatmani.kt, hareket/Klip.kt). -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/park_*,@drawable/surus_*,@drawable/karsilama_*,@drawable/boya_*,@drawable/sahne_*,@font/geist,@font/geist_mono,@font/instrument_serif,@font/barlow_condensed">
+    tools:keep="@font/geist,@font/geist_mono,@font/instrument_serif,@font/barlow_condensed">
     <!-- tokens.json gece.bg; the full palettes live in tema/Palet.kt -->
     <color name="ilk_kare">#05070B</color>
 </resources>

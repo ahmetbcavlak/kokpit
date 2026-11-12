@@ -36,7 +36,11 @@ class HareketBaglayiciTest {
     }
 
     @Before
-    fun hazirla() = TestYardim.esZamanli()
+    fun hazirla() {
+        TestYardim.esZamanli()
+        // This test wires its own HareketBaglayici by hand: the activity runs without one.
+        dev.kokpit.anaekran.Baglayicilar.uret = { emptyList() }
+    }
 
     @Test
     fun kurBaslaDurBirakVeAcilis() {

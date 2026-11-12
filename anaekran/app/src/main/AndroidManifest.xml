@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- GPS speed (veri/HizKaynagi); asked at run time. No background location. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Lint CoarseFineLocation is about Android 12+, where a user may grant only COARSE; the
+         unit runs Android 8.1 (one location group, FINE asked and granted as one). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:ignore="CoarseFineLocation" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <!-- Package visibility (only enforced on API 30+; harmless on the 8.1 head unit).

@@ -1,21 +1,22 @@
 package dev.kokpit.anaekran.arayuz
 
-import android.graphics.Color
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.widget.ImageView
 import dev.kokpit.anaekran.R
 import dev.kokpit.anaekran.ekran.Ekran
-import dev.kokpit.anaekran.tema.Palet
 
 /**
- * Bottom layer: one opaque 768×1024 picture per screen and theme. The bitmap is decoded on
- * the worker thread; until it arrives the previous picture (or the window colour) stays.
- * The motion task cross-fades on top of this view; it must not change [goster]'s choice.
+ * Bottom layer: one opaque 768×1024 picture (texture + car, composited ahead of time).
+ * The bitmap is decoded on the worker thread; until it arrives the previous picture (or the
+ * window colour) stays. Which picture is decided by [kaynak]; the cross-fade between two
+ * pictures is the motion layer's (MainActivity calls `HareketBaglayici.gecisOynat` before
+ * [goster]).
  */
 class SahneKatmani(val gorunum: ImageView, private val ilkKare: () -> Unit) {
 
-    private var istenen = 0
+    /** The picture asked for last (0 = none yet). */
+    var istenen = 0
+        private set
+
     private var ilkKareBitti = false
 
     init {
@@ -23,10 +24,7 @@ class SahneKatmani(val gorunum: ImageView, private val ilkKare: () -> Unit) {
         gorunum.importantForAccessibility = ImageView.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
-    fun goster(ekran: Ekran, p: Palet) {
-        val id = kaynak(ekran, p.gunduz)
-        // Y-5: the climate panel dims its texture to 70 %.
-        gorunum.colorFilter = if (ekran == Ekran.KLIMA && !p.gunduz) KARART else null
+    fun goster(id: Int) {
         if (id == istenen) return
         istenen = id
         Gorseller.al(gorunum.resources, id) { bmp ->
@@ -40,17 +38,34 @@ class SahneKatmani(val gorunum: ImageView, private val ilkKare: () -> Unit) {
     }
 
     companion object {
-        private val KARART = PorterDuffColorFilter(Color.rgb(179, 179, 179), PorterDuff.Mode.MULTIPLY)
-
         /**
-         * 0.1 mapping. Night uses the ready scenes (texture + car). Day has only the texture:
-         * the day car (arac/park_gunduz) is placed over it by the screens task (cars.json map).
+         * The picture for a screen. Night: the design package's ready scenes (texture + car,
+         * pixel-identical to the clips' last frames, K-47). Day: the day car composited onto
+         * boya_gunduz with cars.json `map` (k 0.601, left −74.6, top 242.7) at build time
+         * (sahne_park_gunduz, sahne_surus_gunduz). There is no day picture with the boot open:
+         * the day park scene stays and the HUD points at the boot. The climate and apps panels
+         * show the bare texture.
+         *
+         * [ekran] ACILIS is not asked for: MainActivity uses the intro's target screen.
          */
-        fun kaynak(ekran: Ekran, gunduz: Boolean): Int = if (gunduz) R.drawable.boya_gunduz else when (ekran) {
-            Ekran.ACILIS -> R.drawable.sahne_karsilama
-            Ekran.PARK -> R.drawable.sahne_park
-            Ekran.SURUS -> R.drawable.sahne_surus
-            Ekran.KLIMA, Ekran.UYGULAMALAR -> R.drawable.boya_gece
+        fun kaynak(ekran: Ekran, gunduz: Boolean, bagajAcik: Boolean): Int = when (ekran) {
+            Ekran.ACILIS, Ekran.PARK -> when {
+                gunduz -> R.drawable.sahne_park_gunduz
+                bagajAcik -> R.drawable.sahne_bagaj
+                else -> R.drawable.sahne_park
+            }
+            Ekran.SURUS -> if (gunduz) R.drawable.sahne_surus_gunduz else R.drawable.sahne_surus
+            Ekran.KLIMA, Ekran.UYGULAMALAR -> if (gunduz) R.drawable.boya_gunduz else R.drawable.boya_gece
+        }
+
+        /** Which cars.json frame (anchor points) a scene shows; null = no car in it. */
+        fun kare(id: Int): AracHaritasi.Kare? = when (id) {
+            R.drawable.sahne_park -> AracHaritasi.Kare.PARK_GECE
+            R.drawable.sahne_park_gunduz -> AracHaritasi.Kare.PARK_GUNDUZ
+            R.drawable.sahne_bagaj -> AracHaritasi.Kare.BAGAJ
+            R.drawable.sahne_surus -> AracHaritasi.Kare.SURUS_GECE
+            R.drawable.sahne_surus_gunduz -> AracHaritasi.Kare.SURUS_GUNDUZ
+            else -> null
         }
     }
 }

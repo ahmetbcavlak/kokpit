@@ -1,9 +1,11 @@
 package dev.kokpit.anaekran.arayuz
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.TextUtils
 import android.text.TextPaint
 import android.text.style.MetricAffectingSpan
 import android.util.TypedValue
@@ -27,6 +29,39 @@ fun Context.metin(
     includeFontPadding = false
     letterSpacing = harfAraligi
     if (tabular) fontFeatureSettings = "'tnum'"
+}
+
+/**
+ * Sets the text only when it really changed (finding İ-1: no setText, so no relayout or
+ * invalidate, for a value that repeats). Spans are not compared: the spans in this app depend
+ * on the characters only (ustDereceli).
+ */
+fun TextView.yaz(metin: CharSequence?) {
+    val yeni = metin ?: ""
+    if (!TextUtils.equals(text, yeni)) text = yeni
+}
+
+/** Sets the text colour only when it changed. */
+fun TextView.renkle(renk: Int) {
+    if (currentTextColor != renk) setTextColor(renk)
+}
+
+/** [c] with its alpha multiplied by [a] (0–1). */
+fun saydam(c: Int, a: Float): Int = Color.argb(Math.round(Color.alpha(c) * a), Color.red(c), Color.green(c), Color.blue(c))
+
+/** Source-over: [ust] painted on [alt] (both ARGB, non-premultiplied). */
+fun ustune(ust: Int, alt: Int): Int {
+    val ua = Color.alpha(ust) / 255f
+    val aa = Color.alpha(alt) / 255f
+    val oa = ua + aa * (1 - ua)
+    if (oa <= 0f) return 0
+    fun kanal(u: Int, a: Int) = Math.round((u * ua + a * aa * (1 - ua)) / oa)
+    return Color.argb(
+        Math.round(oa * 255),
+        kanal(Color.red(ust), Color.red(alt)),
+        kanal(Color.green(ust), Color.green(alt)),
+        kanal(Color.blue(ust), Color.blue(alt)),
+    )
 }
 
 /** Formatting for user-visible numbers (Turkish: decimal comma). */

@@ -18,26 +18,82 @@
     <string name="not_zlink_yok">%1$s açılamadı: ZLink bu cihazda bulunamadı.</string>
     <string name="not_muzik_yok">Müzik açılamadı: medya oynatıcı bulunamadı.</string>
     <string name="not_acilamadi">%1$s şu an açılamadı.</string>
+    <string name="not_ayarlar_acilamadi">Ayarlar açılamadı. Ayarlar uygulamasından elle açabilirsin.</string>
+    <string name="not_klima_pasif">Klima 0.1\'de yalnız gösterim: ayarı araçtaki düğmelerden yap.</string>
 
-    <!-- Placeholder screens (final screens come later) -->
-    <string name="ekran_acilis">Hoş geldin</string>
-    <string name="ekran_park">Park</string>
-    <string name="ekran_surus">Sürüş</string>
-    <string name="ekran_klima">Klima</string>
-    <string name="ekran_uygulamalar">Uygulamalar</string>
-    <string name="yer_tutucu">yer tutucu · son tasarım sonraki sürümde</string>
+    <!-- Status line, shared HUD words -->
+    <string name="dis_derece">dış %1$s</string>
     <string name="kapilar">kapılar</string>
     <string name="bagaj">bagaj</string>
-    <string name="hiz">hız</string>
     <string name="kapali">Kapalı</string>
     <string name="acik">Açık</string>
-    <string name="bilinmiyor">—</string>
-    <string name="tek_bolge">Tek bölge</string>
+    <string name="biri_acik">Biri açık</string>
+    <string name="oto">Oto</string>
+
+    <!-- Intro (Y-1) -->
+    <string name="selam_sabah">Günaydın.</string>
+    <string name="selam_gun">İyi günler.</string>
+    <string name="selam_aksam">İyi akşamlar.</string>
+    <string name="selam_gece">İyi geceler.</string>
+    <string name="acilis_alt">Gece mavisi hazır</string>
+
+    <!-- Park (Y-2 / Y-7) -->
+    <string name="park_baslik">Gece mavisi</string>
+    <string name="arac_duruyor">Araç duruyor</string>
+    <string name="kapilar_kapali">kapılar kapalı</string>
+    <string name="bagaj_kapali">bagaj kapalı</string>
+    <string name="ayrac">" · "</string>
+
+    <!-- Drive (Y-3 / Y-11) -->
+    <string name="hiz_birim">km/sa · gps</string>
+    <string name="hiz_bekleniyor">km/sa · gps sinyali bekleniyor</string>
+    <string name="hiz_izin_yok">km/sa · konum izni yok</string>
+
+    <!-- Door / boot warning (Y-4, Y-10, Y-14) and the closed confirmation (Y-13 look) -->
+    <string name="uyari_kapi">Kapı açık</string>
+    <string name="uyari_bagaj">Bagaj açık</string>
+    <string name="uyari_ikisi">Kapı ve bagaj açık</string>
+    <string name="uyari_kapi_alt">kapatınca bu uyarı kendiliğinden kalkar</string>
+    <string name="uyari_bagaj_alt">yükleme bitince kapat</string>
+    <string name="uyari_surus_alt">Güvenli bir yerde dur ve kapat</string>
+    <string name="kapandi_kapi">Kapı kapandı.</string>
+    <string name="kapandi_bagaj">Bagaj kapandı.</string>
+    <string name="kapandi_ikisi">Kapı ve bagaj kapandı.</string>
+    <string name="kapandi_alt">Uyarı kendiliğinden kalktı</string>
+
+    <!-- Climate panel (Y-5), display only in 0.1 -->
+    <string name="ekran_klima">Klima</string>
+    <string name="klima_alt">Yalnız gösterim · %1$s</string>
     <string name="fan">Fan</string>
-    <string name="hava_yonu">Hava yönü</string>
-    <string name="buz_cozme">Ön camı çöz</string>
-    <string name="pasif_not">0.1: yalnız gösterim, düğmeler araca komut göndermez</string>
+    <string name="mod_oto">oto</string>
+    <string name="mod_elle">elle</string>
+    <string name="mod_ac_acik">a/c açık</string>
+    <string name="mod_ac_kapali">a/c kapalı</string>
+    <string name="ac">A/C</string>
+    <string name="acik_kucuk">açık</string>
+    <string name="kapali_kucuk">kapalı</string>
+    <string name="pasif_not">düğmeler 0.2\'de çalışacak · araca komut gönderilmez</string>
+    <string name="sicaklik_azalt">Sıcaklığı azalt (0.1\'de pasif)</string>
+    <string name="sicaklik_artir">Sıcaklığı artır (0.1\'de pasif)</string>
+    <string name="fan_azalt">Fanı azalt (0.1\'de pasif)</string>
+    <string name="fan_artir">Fanı artır (0.1\'de pasif)</string>
+
+    <!-- Apps -->
+    <string name="ekran_uygulamalar">Uygulamalar</string>
     <string name="yukleniyor">Yükleniyor…</string>
     <string name="uygulama_yok">Yüklü uygulama bulunamadı.</string>
+    <plurals name="uygulama_sayisi">
+        <item quantity="one">%1$d uygulama</item>
+        <item quantity="other">%1$d uygulama</item>
+    </plurals>
     <string name="lisanslar">Yazı tipi lisansları</string>
+    <string name="lisans_alt">SIL Open Font License 1.1</string>
+    <string name="lisans_giris">Bu uygulamadaki yazı tipleri Google Fonts\'tan alındı, Latin alt kümesine indirildi ve SIL Open Font License 1.1 ile dağıtılıyor.</string>
+    <string name="lisans_okunamadi">(lisans dosyası okunamadı)</string>
+
+    <!-- Hints -->
+    <string name="ipucu_ac">Ayarları aç</string>
+
+    <!-- Diagnostics panel -->
+    <string name="teshis_baslik">Kokpit Ana Ekran %1$s (%2$d) · teşhis · dokun: kapat</string>
 </resources>

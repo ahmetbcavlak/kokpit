@@ -11,14 +11,18 @@ interface EkranGorunumu {
     fun temaDegisti(p: Palet) {}
     /** Once a minute while visible (clock). */
     fun dakikaGecti() {}
-    /** Just came to the front. */
+    /** Just came to the front (called when its transition starts, so it fades in with fresh content). */
     fun gosterildi() {}
+
+    /** Its transition out has finished and it is GONE (it is not in front any more). */
+    fun gizlendi() {}
 }
 
 /**
- * How one screen view replaces another. 0.1: instantly. The motion task supplies its own
- * (alpha/translation only) and the screens task sets it on [EkranYoneticisi.gecis].
- * Contract: when done, [eski] is GONE (or null) and [yeni] is VISIBLE; call [bitti] once.
+ * How one screen view replaces another. Default: instantly; MainActivity sets the motion
+ * layer's YumusakGecis (alpha/translation only).
+ * Contract: when done, [eski] is GONE (or null) and [yeni] is VISIBLE; call [bitti] once. A new
+ * [gec] while one runs must finish the running one first (its [bitti] included).
  */
 fun interface Gecis {
     fun gec(eski: View?, yeni: View, bitti: () -> Unit)
