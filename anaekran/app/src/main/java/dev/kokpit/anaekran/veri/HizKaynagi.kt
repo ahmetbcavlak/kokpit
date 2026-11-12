@@ -9,7 +9,8 @@ import android.os.Looper
 import android.os.SystemClock
 
 /**
- * GPS speed (LocationManager.GPS_PROVIDER, 1 s / 0 m) and the parked/driving state.
+ * GPS speed (LocationManager.GPS_PROVIDER, 1 s / 0 m) and the parked/driving state. The speed is
+ * written rounded to 1 km/h; the hysteresis uses the unrounded value.
  *
  * Staleness, checked once a second on the main thread:
  *  - no fix with speed for more than [HIZ_ESKIME_NS] (5 s): speed -> null, so the screen never shows a
@@ -90,10 +91,15 @@ class HizKaynagi(
         val kmh = loc.speed.coerceAtLeast(0f) * 3.6
         val simdi = simdiNs()
         sonOrnekNs = simdi
-        val ns = loc.elapsedRealtimeNanos.takeIf { it > 0L } ?: simdi
+        // The fix's own clock, unless it is missing or more than 2 s away from ours (a bad stamp
+        // would stretch or shrink the hysteresis durations).
+        val damga = loc.elapsedRealtimeNanos
+        val ns = if (damga > 0L && Math.abs(damga - simdi) <= SAPMA_NS) damga else simdi
         val hal = karar.ornek(kmh, ns)
+        // Shown to 1 km/h: parked GPS noise (0.3, 0.7, 1.1 …) does not wake the screen every second.
+        val gosterilen = Math.round(kmh).toDouble()
         AracVerisi.guncelle {
-            hiz(kmh)
+            hiz(gosterilen)
             hareketHali(hal)
         }
     }
@@ -125,6 +131,7 @@ class HizKaynagi(
         const val DENETIM_MS = 1000L
         const val HIZ_ESKIME_NS = 5_000_000_000L
         const val HAL_ESKIME_NS = 60_000_000_000L
+        const val SAPMA_NS = 2_000_000_000L
         private const val YOK = Long.MIN_VALUE
     }
 }

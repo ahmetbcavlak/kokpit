@@ -49,7 +49,11 @@ class YasakCagriTest {
     fun erisilebilirlikAyariHareketIzniVermez() {
         val xml = File("src/main/res/xml/kapi_servisi.xml").readText()
         val ayar = xml.replace(Regex("""<!--.*?-->""", RegexOption.DOT_MATCHES_ALL), " ")
-        for (y in listOf("canPerformGestures", "flagRequestTouchExplorationMode", "flagRequestFilterKeyEvents", "canRequestFilterKeyEvents", "packageNames")) {
+        for (y in listOf(
+            "canPerformGestures", "canRequestEnhancedWebAccessibility", "flagIncludeNotImportantViews",
+            "flagRequestTouchExplorationMode", "flagRequestFilterKeyEvents", "canRequestFilterKeyEvents",
+            "canRequestTouchExplorationMode", "packageNames",
+        )) {
             assertTrue("$y in kapi_servisi.xml", !ayar.contains(y))
         }
         assertTrue(ayar.contains("flagRetrieveInteractiveWindows"))

@@ -6,6 +6,7 @@ import android.os.HandlerThread
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * "Kokpit kapı uyarısı": reads the door/boot popup of com.hcn.autocan and writes
@@ -17,25 +18,49 @@ import java.util.concurrent.Executor
  *
  * What it sees: Android delivers window events of every app (no packageNames filter, because
  * TYPE_WINDOWS_CHANGED has no package and would be dropped — research decision 6). For other apps'
- * windows only the package name of the root node is looked at, then dropped; nothing of theirs is kept.
+ * windows only the package name of the root node is looked at (once per window id, then cached),
+ * and dropped; nothing of theirs is kept.
+ *
+ * Configuration (res/xml/kapi_servisi.xml) is Keşif 0.6's, which caught the popup on the car. No
+ * flagIncludeNotImportantViews: it widens the node tree; if the car shows the popup text cannot be
+ * read, 0.2 adds it.
  *
  * Runs on its own, bound by the system, independent of the Activity's life cycle. Same process as the
  * app, so it writes through [AracVerisi.guncelle], which moves the write to the main looper (decision 8).
- * Fetching nodes is a blocking call into the other app, so that work runs on a worker thread.
+ * Fetching nodes is a blocking call into the other app, so that work runs on one worker thread, in order.
  */
 class KapiServisi : AccessibilityService() {
 
     private val yorumlayici = KapiYorumlayici()
     private var isci: HandlerThread? = null
     private var isciHandler: Handler? = null
-    @Volatile private var taramaBekliyor = false
+
+    /** Scan requests and the newest request a started scan already covers (worker side). */
+    private val istenen = AtomicInteger(0)
+    private var karsilanan = 0
+
+    /** Window id → package of the root node, for windows seen before (worker thread only). */
+    private val paketler = HashMap<Int, String>()
+
+    /** This instance's generation; a write from an older (destroyed) instance is dropped on main. */
+    private var nesil = 0
+
     /** Last values handed to AracVerisi (worker thread only); the write itself lands later on main. */
-    /** Set in onDestroy: a scan still queued on the worker must not write after the "unknown". */
-    @Volatile private var bitti = false
     private var sonKapi: Boolean? = null
     private var sonBagaj: Boolean? = null
 
-    override fun onServiceConnected() {
+    override fun onCreate() {
+        super.onCreate()
+        nesil = ++etkinNesil
+        if (yurutucu == null) {
+            val t = HandlerThread("kokpit-kapi").also { it.start() }
+            isci = t
+            isciHandler = Handler(t.looper)
+        }
+    }
+
+    /** Public so tests can call it as the system does. */
+    public override fun onServiceConnected() {
         Teshis.kapiServisiBagli = true
         Teshis.kapiOlayi("servis bağlandı")
         // A popup already on screen is picked up at once. No popup leaves both flags unknown (null):
@@ -58,40 +83,60 @@ class KapiServisi : AccessibilityService() {
                         yorumlayici.durumOlayi(paket, sinif, metinler, id)
                         Teshis.kapiOlayi("durum $id ${sinif.orEmpty()} \"${metinler.filterNotNull().joinToString(" | ")}\"")
                         yaz()
+                        // Not confirmed by the list yet: look again after the time-out (decision 7).
+                        if (yorumlayici.dogrulanmamisVar()) gecikmeliTara()
                     }
-                    // Confirm through the window list (and read the node text if the event had none).
+                    // Always a pass after this event: confirms it and reads node text the event lacked.
                     taramaIste()
                 }
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED -> taramaIste()
+                else -> Unit // only the two types above are subscribed (res/xml/kapi_servisi.xml)
             }
         } catch (t: Throwable) {
             Teshis.hata("kapı olayı", t)
         }
     }
 
-    /** Coalesces bursts of TYPE_WINDOWS_CHANGED into one pass on the worker. */
+    /**
+     * Asks for a pass. Bursts collapse: a pass covers every request made before it started, and a request
+     * made after a pass started always gets a pass of its own (counters, not a single "pending" flag).
+     */
     private fun taramaIste() {
-        if (taramaBekliyor) return
-        taramaBekliyor = true
+        val no = istenen.incrementAndGet()
         calistir {
-            taramaBekliyor = false
+            if (no <= karsilanan) return@calistir
+            karsilanan = istenen.get()
             tara()
         }
+    }
+
+    private fun gecikmeliTara() {
+        val ms = KapiYorumlayici.ZAMAN_ASIMI_MS + 500L
+        val r = Runnable { taramaIste() }
+        gecikmeli?.let { it(ms, r); return }
+        isciHandler?.postDelayed(r, ms)
     }
 
     /** Worker thread. */
     private fun tara() {
         val liste = ArrayList<KapiYorumlayici.Pencere>()
         val okunamayan = HashSet<Int>()
+        val simdikiler = HashSet<Int>()
         val pencereler = try { windows } catch (t: Throwable) { Teshis.hata("getWindows", t); return }
         for (w in pencereler.orEmpty()) {
             try {
+                val id = w.id
+                simdikiler += id
+                val bilinen = paketler[id]
+                // A window known to be another app's: its root is not fetched again.
+                if (bilinen != null && bilinen != KapiMetni.PAKET) continue
                 val kok = w.root
-                if (kok == null) { okunamayan += w.id; continue }
+                if (kok == null) { okunamayan += id; continue }
                 try {
-                    val paket = kok.packageName?.toString()
+                    val paket = kok.packageName?.toString() ?: continue
+                    paketler[id] = paket
                     if (paket != KapiMetni.PAKET) continue
-                    liste += KapiYorumlayici.Pencere(w.id, paket, kok.className?.toString(), gorunenMetin(kok))
+                    liste += KapiYorumlayici.Pencere(id, paket, kok.className?.toString(), gorunenMetin(kok))
                 } finally {
                     kok.recycle()
                 }
@@ -99,6 +144,7 @@ class KapiServisi : AccessibilityService() {
                 w.recycle()
             }
         }
+        paketler.keys.retainAll(simdikiler)
         val once = yorumlayici.ozet()
         yorumlayici.pencereler(liste, okunamayan)
         if (liste.isNotEmpty() || once != yorumlayici.ozet()) {
@@ -108,7 +154,8 @@ class KapiServisi : AccessibilityService() {
     }
 
     private fun yaz() {
-        if (bitti) return
+        val n = nesil
+        if (n != etkinNesil) return
         // Values are taken here, on the worker; the block only hands them over (it runs later on main).
         val kapi = yorumlayici.kapiAcik()
         val bagaj = yorumlayici.bagajAcik()
@@ -116,8 +163,11 @@ class KapiServisi : AccessibilityService() {
         sonKapi = kapi
         sonBagaj = bagaj
         AracVerisi.guncelle {
-            kapiAcik(kapi)
-            bagajAcik(bagaj)
+            // Checked again on main: the service may have been destroyed after the post.
+            if (n == etkinNesil) {
+                kapiAcik(kapi)
+                bagajAcik(bagaj)
+            }
         }
     }
 
@@ -129,11 +179,12 @@ class KapiServisi : AccessibilityService() {
         val sonuc = ArrayList<CharSequence?>()
         var butce = 60
         fun gez(n: AccessibilityNodeInfo, derinlik: Int) {
-            if (butce-- <= 0) return
+            butce--
             n.text?.let { sonuc += it.toString() }
             n.contentDescription?.let { sonuc += it.toString() }
             if (derinlik >= 6) return
             for (i in 0 until n.childCount) {
+                if (butce <= 0) break
                 val c = n.getChild(i) ?: continue
                 try { gez(c, derinlik + 1) } finally { c.recycle() }
             }
@@ -148,16 +199,15 @@ class KapiServisi : AccessibilityService() {
             try { blok() } catch (t: Throwable) { Teshis.hata("kapı servisi", t) }
         }
         yurutucu?.let { it.execute(sarili); return }
-        val h = isciHandler ?: HandlerThread("kokpit-kapi").also { it.start(); isci = it }
-            .let { Handler(it.looper) }.also { isciHandler = it }
-        h.post(sarili)
+        isciHandler?.post(sarili)
     }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         // Switched off (or the app updated): the door state is no longer known — not "closed".
-        bitti = true
+        // A newer generation makes every write still queued from this instance a no-op.
+        etkinNesil++
         Teshis.kapiServisiBagli = false
         Teshis.kapiOlayi("servis durdu")
         calistir { yorumlayici.sifirla() }
@@ -174,5 +224,9 @@ class KapiServisi : AccessibilityService() {
     companion object {
         /** Tests run the worker's jobs inline. null = own HandlerThread. */
         @Volatile internal var yurutucu: Executor? = null
+        /** Tests catch the delayed re-scan here. null = the worker's postDelayed. */
+        @Volatile internal var gecikmeli: ((Long, Runnable) -> Unit)? = null
+        /** Generation of the live service instance (changes in onCreate and onDestroy). */
+        @Volatile internal var etkinNesil = 0
     }
 }
