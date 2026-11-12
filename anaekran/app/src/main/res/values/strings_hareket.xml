@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Motion task (hareket/). Frame-rate counter text; fits the 96×20 design-px slot in
+     Geist Mono 11 px ("99 fps 999 ms" = 86 px). -->
+<resources>
+    <string name="kare_hizi">%1$d fps %2$d ms</string>
+    <string name="kare_hizi_yok">— fps</string>
+</resources>
