@@ -74,4 +74,47 @@ class DiagnosticsTest {
         // Robolectric connects with a null binder: not a usable connection.
         assertEquals("false", r["Bağlanılabilir"])
     }
+
+    @Test
+    fun closeTestDoesNothingWithoutService() {
+        val msg = CloseTest.request()
+        println(msg)
+        assertTrue(msg.contains("kapalı"))
+        assertFalse(CloseTest.running || CloseTest.armed)
+    }
+
+    @Test
+    fun interfaceListingWithoutVendorApp() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        var done = false
+        ServiceProbe.listInterface(app) { done = true }
+        val until = System.currentTimeMillis() + 8000
+        while (!done && System.currentTimeMillis() < until) {
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200)); Thread.sleep(50)
+        }
+        assertTrue(done)
+        val lines = ServiceProbe.interfaceLines!!
+        println(lines.joinToString("\n") { "${it.label}: ${it.value}" })
+        assertTrue(lines.any { it.label == "APK" && it.value.contains("bulunamadı") })
+        assertTrue(ServiceProbe.interfaceFile(app).readText().contains("arayüz listesi"))
+    }
+
+    @Test
+    fun doorWindowWordsAreWholeWords() {
+        // Door warning: yes
+        assertTrue(UiDump.doorish("com.hcn.autocan.CanDoorWindow", name = true))
+        assertTrue(UiDump.doorish("iv_door_fl", name = true))
+        assertTrue(UiDump.doorish("Sol ön kapı açık", name = false))
+        assertTrue(UiDump.doorish("Bagaj kapısı açık", name = false))
+        assertTrue(UiDump.doorish("Door open", name = false))
+        assertTrue(UiDump.doorish("Kapıyı kapatın", name = false))
+        assertTrue(UiDump.doorish("Kapılar açık", name = false))
+        // Climate and others: no
+        assertFalse(UiDump.doorish("com.hcn.autocan.OutdoorTempView", name = true))
+        assertFalse(UiDump.doorish("tv_outdoor_temp", name = true))
+        assertFalse(UiDump.doorish("Outdoor 18°C", name = false))
+        assertFalse(UiDump.doorish("Indoor", name = false))
+        assertFalse(UiDump.doorish("kapalı", name = false))
+        assertFalse(UiDump.doorish("Klima kapatıldı", name = false))
+    }
 }

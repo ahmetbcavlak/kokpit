@@ -6,7 +6,7 @@ Renault Mégane IV'teki dikey araç ekranı için kendi arayüzümüz.
 
 **[▶ Kokpit Keşif'i indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-kesif.apk)**
 
-Sürüm: 0.6.0 · 128 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
+Sürüm: 0.7.0 · 137 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
 
 0.4.0'dan beri yeni bir imza anahtarı kullanılıyor; 0.2.0'ın üzerine kurulmaz. Ekranda 0.2.0 varsa bir kez:
 
@@ -19,6 +19,12 @@ Sürüm: 0.6.0 · 128 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüy
 ## Kokpit Keşif nedir?
 
 Ekranı ve araçtan gelen veriyi tanımak için küçük bir uygulama. **Yalnızca okur, hiçbir ayarı değiştirmez, araca hiçbir şey göndermez.**
+
+### 0.7.0 · Arayüz dökümü, kapatma testi, servis arayüzü listesi
+
+- **Arayüz dökümü:** com.hcn.autocan penceresi (ör. kapı uyarısı) açıldığında her bileşenin `viewIdResourceName`, `className`, metni, `contentDescription`, `isVisibleToUser`, `boundsInScreen` değerleri ve seçilen kapatma düğmesinin kimliği ve merkez koordinatı `arayuz-dokumu.csv`'ye (iPad: `/arayuz.csv`).
+- **Kapatma testi:** "Kapı penceresini kapatmayı dene" düğmesi. Yalnız düğmeye basınca, yalnız kapı uyarısı penceresinde (klima penceresine asla), tek deneme: kapatma düğmesine `ACTION_CLICK`; bulunamazsa `GLOBAL_ACTION_BACK`, o da yalnız hemen önce yapılan kontrolde kapı uyarısı odaktaysa. Uyarı yoksa 15 sn bekler. Kapanma süresi (ms) `pencere-olaylari.csv`'ye.
+- **CanService arayüz listesi:** servise bir kez bağlanıp yalnız arayüz adı sorulur (`getInterfaceDescriptor`), metotlar ve TRANSACTION kodları üreticinin APK'sından okunur; `servis-arayuzu.txt` ve rapor. Arayüzün hiçbir metodu çağrılmaz, araca komut gitmez. Klima +0,5° komutu, liste ve araçtaki `ACTION_AIR_INFO` doğrulamasından sonra.
 
 ### 0.6.0 · Seri port, pencere günlüğü ve servis kontrolü
 
