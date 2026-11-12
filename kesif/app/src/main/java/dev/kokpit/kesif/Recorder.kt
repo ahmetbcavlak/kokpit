@@ -144,6 +144,9 @@ object Recorder {
         syncNow = true
     }
 
+    /** A row from elsewhere in the app (e.g. the window log); ignored when nothing is recording. */
+    fun event(at: Long, kind: String, key: String, old: String, new: String) = write(at, kind, key, old, new, "")
+
     private fun write(at: Long, kind: String, key: String, old: String, new: String, note: String) {
         synchronized(lock) {
             if (out == null) return

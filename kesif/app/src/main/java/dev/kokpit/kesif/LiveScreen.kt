@@ -96,6 +96,9 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
     private val pkgInfo = label("Paketler sayılıyor…", 14f, Palette.muted)
     private val pkgStatus = label("", 14f, Palette.text)
     private val pkgButton = button("Paketleri dışa aktar", primary = false) { exportPackages() }
+    private val winStatus = label("", 14f, Palette.text)
+    private val svcResult = label("Henüz denenmedi", 13f, Palette.text, mono = true)
+    private val svcButton = button("CanService bağlanma testi", primary = false) { serviceTest() }
     private var qrFor: String? = null
 
     init { build() }
@@ -183,6 +186,25 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
             a.runOnUiThread { pkgInfo.text = text }
         }
 
+        // Diagnostics: window log and service check
+        LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = GradientDrawable().apply { setColor(Palette.surface); cornerRadius = dp(16).toFloat() }
+            addView(label("Kapı uyarısı penceresi günlüğü", 17f, Palette.accent, bold = true))
+            addView(label("com.hcn.autocan’ın açtığı pencereleri (ör. CanDoorWindow) saatiyle pencere-olaylari.csv’ye yazar. Android tüm uygulamaların pencere olaylarını iletir; diğerlerini görür ama yazmaz. Hiçbir şeye dokunmaz. Bir kez Erişilebilirlik ayarlarından açılması gerekir.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
+            addView(winStatus.apply { setPadding(0, 0, 0, dp(8)) })
+            addView(button("Erişilebilirlik ayarlarını aç", primary = false) {
+                runCatching { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                    .onFailure { Toast.makeText(a, "Ayarlar açılamadı", Toast.LENGTH_SHORT).show() }
+            }, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)))
+            addView(label("CanService erişilebilirliği", 17f, Palette.accent, bold = true).apply { setPadding(0, dp(16), 0, 0) })
+            addView(label("Tek bir bindService() denemesi: bağlantı gelirse hemen kapatılır, hiçbir metot çağrılmaz; servis çalışmıyorsa başlatılmaz. Servis çalışıyorsa üreticinin bağlanma ve ayrılma kodu bir kez çalışır.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
+            addView(svcResult.apply { setPadding(0, 0, 0, dp(8)) })
+            addView(svcButton, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)))
+            content.addView(this, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        }
+
         content.addView(button("Ekran raporu (0.2’deki kimlik kartı)", primary = false) { onReport() },
             LinearLayout.LayoutParams(MATCH_PARENT, dp(60)).apply { bottomMargin = dp(10) })
         content.addView(diag)
@@ -208,6 +230,16 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
     private fun toggleRecording() {
         if (Recorder.recording) Recorder.stop() else Recorder.start()
         tick()
+    }
+
+    private fun serviceTest() {
+        svcResult.text = "Deneniyor…"
+        ServiceProbe.runBindTest(a) {
+            a.runOnUiThread {
+                svcResult.text = (ServiceProbe.staticInfo(a) + ServiceProbe.lastResult.orEmpty())
+                    .joinToString("\n") { "${it.label}: ${it.value}" }
+            }
+        }
     }
 
     private fun exportPackages() {
@@ -307,6 +339,10 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
             qrFor = url
             qr.setImageBitmap(url?.let { Qr.bitmap(it, dp(132), Color.BLACK, Color.WHITE) })
         }
+        val ws = WindowLog.statusText(a)
+        if (winStatus.text.toString() != ws) winStatus.text = ws
+        svcButton.isEnabled = !ServiceProbe.running
+
         val ps = PackageExporter.statusText()
         if (pkgStatus.text.toString() != ps) pkgStatus.text = ps
         pkgButton.isEnabled = !PackageExporter.running

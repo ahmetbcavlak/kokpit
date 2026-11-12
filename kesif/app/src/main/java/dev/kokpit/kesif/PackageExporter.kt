@@ -94,6 +94,8 @@ object PackageExporter {
 
     fun dir(ctx: Context) = File(ctx.filesDir, "kayit/paketler")
 
+    fun appContext(): Context? = app
+
     /** Half-written files left by a power cut, anywhere in the export folder; never served. */
     private fun cleanTmp(d: File) {
         d.walkTopDown().filter { it.isFile && it.name.endsWith(PART) }.forEach { it.delete() }
@@ -431,6 +433,12 @@ object PackageExporter {
      */
     fun writeDiagnosticZip(out: OutputStream) {
         ZipOutputStream(out).use { zip ->
+            // The window event log lives one folder up; it belongs in the diagnostic bundle too.
+            app?.let { WindowLog.file(it) }?.takeIf { it.exists() }?.let { f ->
+                runCatching { FileInputStream(f).use { input ->
+                    zip.putNextEntry(ZipEntry(f.name).apply { time = f.lastModified() }); input.copyTo(zip, 64 * 1024); zip.closeEntry()
+                } }
+            }
             for ((rel, f) in files()) {
                 if (rel.endsWith(".apk") && !rel.startsWith("$MIRROR/")) continue
                 runCatching {

@@ -70,6 +70,11 @@ class ReportServer(
                 else sendGrowing(out, f, "text/csv; charset=utf-8")
             }
             route == "/rapor" -> send(out, "text/html; charset=utf-8", html(report()))
+            route == "/pencereler.csv" -> {
+                val f = PackageExporter.appContext()?.let { WindowLog.file(it) }
+                if (f == null || !f.exists()) send(out, "text/plain; charset=utf-8", "Henüz pencere olayı yok", 404)
+                else sendGrowing(out, f, "text/csv; charset=utf-8")
+            }
             route == "/paketler" || route == "/paketler/" -> send(out, "text/html; charset=utf-8", packagesPage())
             route == "/paketler/teshis.zip" && PackageExporter.running ->
                 send(out, "text/plain; charset=utf-8", "Dışa aktarma sürüyor; bitince yeniden dene.", 409)

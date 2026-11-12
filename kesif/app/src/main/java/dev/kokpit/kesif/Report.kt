@@ -260,7 +260,8 @@ object ReportBuilder {
 
         return Report(
             now, summary,
-            listOf(reality, device, DeviceInfo.section(), screen, cpu, home, settings, net, appSummary) + components(ctx) + props,
+            listOf(reality, device, DeviceInfo.section()) + SerialPorts.sections() +
+                listOf(screen, cpu, home, settings, net, appSummary) + components(ctx) + props,
             apps,
         )
     }

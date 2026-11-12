@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kokpit Keşif pencere günlüğü: only listens, never acts.
+  - No packageNames filter here on purpose: TYPE_WINDOWS_CHANGED arrives without a package name and
+    would be dropped. The service itself keeps com.hcn.autocan only (PencereGunlugu).
+  - canRetrieveWindowContent + flagRetrieveInteractiveWindows: needed for TYPE_WINDOWS_CHANGED and the window list.
+  - No canPerformGestures, no flagRequestTouchExplorationMode, no key filtering. Window content access would
+    allow clicking nodes; the service never calls performAction (see PencereGunlugu).
+  - notificationTimeout 0: with a delay the system keeps only the last pending event of a type, so another
+    app's window event could replace the door popup's.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/pencere_gunlugu_aciklama"
+    android:notificationTimeout="0" />

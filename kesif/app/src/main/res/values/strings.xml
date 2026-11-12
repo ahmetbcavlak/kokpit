@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pencere_gunlugu_adi">Kokpit Keşif pencere günlüğü</string>
+    <string name="pencere_gunlugu_aciklama">Yalnız com.hcn.autocan uygulamasının açtığı pencereleri (ör. kapı uyarısı) zaman, sınıf adı ve görünen metinle Keşif\'in kendi klasöründeki bir CSV dosyasına yazar. Android ona tüm uygulamaların pencere olaylarını iletir; diğer uygulamalarınkini görür ama hiçbir yere yazmaz. Hiçbir şeye dokunmaz, tıklamaz, yazı yazmaz.</string>
+</resources>

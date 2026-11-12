@@ -6,7 +6,7 @@ Renault Mégane IV'teki dikey araç ekranı için kendi arayüzümüz.
 
 **[▶ Kokpit Keşif'i indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-kesif.apk)**
 
-Sürüm: 0.5.1 · 117 KB · 0.4 ve 0.5'in üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
+Sürüm: 0.6.0 · 128 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
 
 0.4.0'dan beri yeni bir imza anahtarı kullanılıyor; 0.2.0'ın üzerine kurulmaz. Ekranda 0.2.0 varsa bir kez:
 
@@ -19,6 +19,12 @@ Sürüm: 0.5.1 · 117 KB · 0.4 ve 0.5'in üzerine kurulur; 0.2.0 yüklüyse **�
 ## Kokpit Keşif nedir?
 
 Ekranı ve araçtan gelen veriyi tanımak için küçük bir uygulama. **Yalnızca okur, hiçbir ayarı değiştirmez, araca hiçbir şey göndermez.**
+
+### 0.6.0 · Seri port, pencere günlüğü ve servis kontrolü
+
+- **Seri portlar:** `/dev/ttyMT1`, `/dev/ttyMT2`, `/dev/ttyS2`, `/dev/ttyS3` için sahip (UID), grup (GID) ve izinler rapora yazılır. Yalnız `Os.stat()` ve `ls -lZ`; port açılmaz, okunmaz, yazılmaz.
+- **Pencere günlüğü (Erişilebilirlik hizmeti):** `com.hcn.autocan`'ın `TYPE_WINDOW_STATE_CHANGED` ve `TYPE_WINDOWS_CHANGED` olayları; zaman, sınıf adı, görünen metin ve contentDescription `pencere-olaylari.csv`'ye (iPad: `/pencereler.csv`) ve açıksa kayda yazılır. Diğer uygulamaların olaylarını görür ama hiçbir yere yazmaz. Hiçbir şeye dokunmaz, tıklamaz. Ayarlar > Erişilebilirlik'ten bir kez açılır.
+- **CanService kontrolü:** PackageManager'dan dışa açık mı, izin gerekiyor mu; düğmeyle tek bir `bindService()` denemesi (BIND_AUTO_CREATE yok, hiçbir metot çağrılmaz, hemen `unbindService()`). Sonuç rapora yazılır. Servis çalışıyorsa üreticinin bağlanma/ayrılma kodu bir kez çalışır.
 
 ### 0.5.1 · Ek teşhis ve yedekleme
 

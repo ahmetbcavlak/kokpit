@@ -380,7 +380,8 @@ object LiveProbe {
         )
     }
 
-    fun attach(r: Report): Report = r.copy(sections = sections() + r.sections)
+    /** Live sections, plus the CAN service check (it changes when the user runs the bind test). */
+    fun attach(r: Report): Report = r.copy(sections = sections() + listOfNotNull(ServiceProbe.section()) + r.sections)
 
     fun json(): String {
         val now = System.currentTimeMillis()

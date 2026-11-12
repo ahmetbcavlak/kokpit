@@ -63,6 +63,7 @@ class MainActivity : Activity() {
         LiveProbe.start(this)
         Recorder.init(this)
         PackageExporter.init(this)
+        ServiceProbe.init(this)
         DeviceInfo.warmUp()
         startServer()
         showLive()

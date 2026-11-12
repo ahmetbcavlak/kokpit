@@ -9,6 +9,11 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- Newer Android versions hide other packages unless named; the CAN service check needs this one. -->
+    <queries>
+        <package android:name="com.hcn.autocan" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_kesif"
@@ -24,5 +29,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Window event log (Keşif 0.6). Off until the user turns it on in Settings > Accessibility.
+             Only the system may bind it (BIND_ACCESSIBILITY_SERVICE). -->
+        <service
+            android:name=".PencereGunlugu"
+            android:exported="true"
+            android:label="@string/pencere_gunlugu_adi"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/pencere_gunlugu" />
+        </service>
     </application>
 </manifest>
