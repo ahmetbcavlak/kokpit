@@ -324,6 +324,46 @@ class KapiTest {
     }
 
     @Test
+    fun servis_uygulamaIciSifirlama() {
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        val sh = shadowOf(s)
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onServiceConnected()
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+
+        // Stuck: the popup went without any event. The diagnostics reset forgets it.
+        sh.setWindows(emptyList())
+        KapiServisi.uygulamaIciSifirla()
+        bosalt()
+        assertNull(AracVerisi.durum.kapiAcik)
+        assertNull(AracVerisi.durum.bagajAcik)
+        assertTrue(Teshis.kapiOlaylari().any { it.contains("uygulama içi sıfırlama") })
+        // The records really went: a later list pass without the popup says "unknown", not "closed".
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, null, null, -1))
+        bosalt()
+        assertNull(AracVerisi.durum.kapiAcik)
+
+        // The popup comes again: written again (the service's last written value was reset too).
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+
+        // Memory only: no global action, no gesture.
+        assertTrue(sh.globalActionsPerformed.isEmpty())
+        assertTrue(sh.gesturesDispatched.isEmpty())
+
+        // Without a connected service the shared state is still cleared.
+        s.onDestroy()
+        bosalt()
+        AracVerisi.guncelle { kapiAcik(true) }
+        KapiServisi.uygulamaIciSifirla()
+        bosalt()
+        assertNull(AracVerisi.durum.kapiAcik)
+    }
+
+    @Test
     fun eskiKapiAlaniTuretilir() {
         @Suppress("DEPRECATION")
         run {

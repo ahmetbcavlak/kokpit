@@ -27,7 +27,6 @@
     <string name="bagaj">bagaj</string>
     <string name="kapali">Kapalı</string>
     <string name="acik">Açık</string>
-    <string name="biri_acik">Biri açık</string>
     <string name="oto">Oto</string>
 
     <!-- Intro (Y-1) -->
@@ -95,5 +94,7 @@
     <string name="ipucu_ac">Ayarları aç</string>
 
     <!-- Diagnostics panel -->
+    <string name="teshis_kapi_sifirla">Kapı uyarısını sıfırla — yalnız bu uygulamada, araca bir şey gönderilmez</string>
+    <string name="teshis_kapi_sifirlandi">Sıfırlandı: kapı ve bagaj bilinmiyor; araç uyarısı yeniden çıkınca gelir</string>
     <string name="teshis_baslik">Kokpit Ana Ekran %1$s (%2$d) · teşhis · dokun: kapat</string>
 </resources>

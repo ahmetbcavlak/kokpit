@@ -110,4 +110,29 @@ class YumusakGecisTest {
         assertEquals(1f, b.alpha)
         assertEquals(1, n)
     }
+
+    @Test
+    fun olculmemisGorunumKatmansizGecer() {
+        // b is GONE, never measured (0×0): the fade runs without a hardware layer (the first screen
+        // change of the app; withLayer would build a layer HWUI cannot use).
+        assertEquals(0, b.width)
+        g.gec(a, b) {}
+        bekle(100)
+        assertEquals(View.LAYER_TYPE_NONE, b.layerType)
+        bekle(400)
+        sonDurum(a, b)
+
+        // Measured views keep the layer for the fade, and drop it at the end.
+        for (v in listOf(b, c)) {
+            v.measure(View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY))
+            v.layout(0, 0, 100, 100)
+        }
+        g.gec(b, c) {}
+        bekle(100)
+        assertEquals(View.LAYER_TYPE_HARDWARE, c.layerType)
+        assertEquals(View.LAYER_TYPE_HARDWARE, b.layerType)
+        bekle(400)
+        sonDurum(b, c)
+        assertEquals(View.LAYER_TYPE_NONE, c.layerType)
+    }
 }

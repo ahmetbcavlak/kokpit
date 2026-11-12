@@ -11,6 +11,8 @@ import android.graphics.drawable.Drawable
 import dev.kokpit.anaekran.arayuz.Arkaplan
 import java.text.Collator
 import java.util.Locale
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 /** One launcher app. [simge] is null until its icon has been drawn (names come first). */
 data class Uygulama(val ad: String, val bilesen: ComponentName, val simge: Drawable?)
@@ -18,7 +20,8 @@ data class Uygulama(val ad: String, val bilesen: ComponentName, val simge: Drawa
 /**
  * Installed launcher apps (queryIntentActivities MAIN/LAUNCHER; no QUERY_ALL_PACKAGES).
  *
- * Two steps on the worker thread, each delivered to the main thread on its own:
+ * Two steps on this list's own single worker thread ([yurutucu], not the scene decoder's), in
+ * order, each delivered to the main thread on its own:
  *  1. names (and icons already in the cache) — the grid appears at once;
  *  2. the missing icons, drawn once into small bitmaps (adaptive icons are costly to redraw),
  *     then the same list with icons.
@@ -31,14 +34,24 @@ object UygulamaListesi {
 
     private class Kayit(val guncelleme: Long, val simge: Drawable)
 
+    /**
+     * One thread for both steps: single-threaded, so step 2 always runs after step 1 (it reads
+     * step 1's list). Lowest priority: the icons may wait, the scene decode must not.
+     * Tests swap in a direct executor.
+     */
+    var yurutucu: Executor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "kokpit-simge").apply { priority = Thread.MIN_PRIORITY; isDaemon = true }
+    }
+
     /** Touched only on the worker thread. */
     private val simgeler = HashMap<ComponentName, Kayit>()
 
     fun yukle(ctx: Context, simgePx: Int, adlar: (List<Uygulama>) -> Unit, tamam: (List<Uygulama>) -> Unit) {
         val app = ctx.applicationContext
         var bulunan: List<Pair<ResolveInfo, Uygulama>> = emptyList()
-        Arkaplan.calistir({ adlariOku(app).also { bulunan = it } }) { liste -> adlar(liste?.map { it.second }.orEmpty()) }
-        Arkaplan.calistir({ simgeleriOku(app, bulunan, simgePx) }) { liste -> liste?.let(tamam) }
+        val y = yurutucu
+        Arkaplan.calistir(y, { adlariOku(app).also { bulunan = it } }) { liste -> adlar(liste?.map { it.second }.orEmpty()) }
+        Arkaplan.calistir(y, { simgeleriOku(app, bulunan, simgePx) }) { liste -> liste?.let(tamam) }
     }
 
     /** Synchronous, names and cached icons only; call off the main thread. */

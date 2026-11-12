@@ -153,11 +153,24 @@ class KlimaTest {
         bosalt()
         assertEquals(14.5, AracVerisi.durum.disSicaklik!!, 0.001)
 
-        // Own broadcast with an unknown single extra: that extra is the value.
-        KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_DIS_SICAKLIK_2).putExtra("x", "-3"))
+        // The other name on record (Keşif's LiveProbe) is read too, as a string.
+        KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_DIS_SICAKLIK_2).putExtra("ACTION_OUTDOOR_TEMP_DATA", "-3"))
         bosalt()
         assertEquals(-3.0, AracVerisi.durum.disSicaklik!!, 0.0)
-        assertTrue(Teshis.disSicaklikHam!!.startsWith("ACTION_OUTDOOR_TEMP_DATA: x=-3"))
+
+        // K-74: an unknown single extra is NOT taken as the value; it is only shown raw.
+        KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_DIS_SICAKLIK_2).putExtra("x", "7"))
+        bosalt()
+        assertEquals(-3.0, AracVerisi.durum.disSicaklik!!, 0.0)
+        assertTrue(Teshis.disSicaklikHam!!.startsWith("ACTION_OUTDOOR_TEMP_DATA: x=7"))
+
+        // Guessed names ("temp", "value", other KEY_VALUE_* forms) are not read either.
+        for (ad in listOf("temp", "value", "KEY_VALUE_OUTDOOR_TEMP", "KEY_VALUE_OUTSIDE_TEMP", "outdoor_temp", "OUTDOOR_TEMP")) {
+            KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_DIS_SICAKLIK).putExtra(ad, 21))
+            KlimaKaynagi.isle(hava(ad to 21))
+        }
+        bosalt()
+        assertEquals(-3.0, AracVerisi.durum.disSicaklik!!, 0.0)
 
         // Out of range: unknown, not the old value.
         KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_DIS_SICAKLIK).putExtra("hcn.air.outdoor_temp", 145))

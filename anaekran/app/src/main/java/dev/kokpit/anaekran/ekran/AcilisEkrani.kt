@@ -10,7 +10,6 @@ import dev.kokpit.anaekran.arayuz.Cizim
 import dev.kokpit.anaekran.arayuz.MutlakDuzen
 import dev.kokpit.anaekran.arayuz.MutlakDuzen.Hiza
 import dev.kokpit.anaekran.arayuz.metin
-import dev.kokpit.anaekran.arayuz.renkle
 import dev.kokpit.anaekran.arayuz.yaz
 import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.Yazi
@@ -25,13 +24,17 @@ import java.util.Date
  * Y-1's own light line at y 900 and the mono line "21:42 · dış 14°" at the bottom (the
  * reference's "iphone bağlanıyor…" is not drawn: no verified phone link). The bottom bar is
  * hidden while this screen is in front (Y-1 has none). A tap cuts the clip ([dokunma]).
+ *
+ * Always the NIGHT palette, by day too: klip_giris, its poster and its last frame
+ * (sahne_karsilama) exist only in the night look, so the day palette's dark ink (#0B0F16) would
+ * be black on black. [temaDegisti] is therefore ignored here.
  */
 class AcilisEkrani(context: Context, dokunma: () -> Unit) : EkranGorunumu {
 
     private val kok = MutlakDuzen(context)
     override val gorunum: View = kok
 
-    private var palet = Palet.GECE
+    private val palet = Palet.GECE
     private var durum = AracDurumu()
     private val saatFormat = SimpleDateFormat("HH:mm", DurumSatiri.TR)
 
@@ -64,13 +67,8 @@ class AcilisEkrani(context: Context, dokunma: () -> Unit) : EkranGorunumu {
         yaz()
     }
 
-    override fun temaDegisti(p: Palet) {
-        palet = p
-        selam.renkle(p.tx)
-        alt.renkle(p.mu)
-        satir.renkle(p.hud)
-        cizim.invalidate()
-    }
+    /** Ignored: the intro is drawn over night-only pictures (see the class notes). */
+    override fun temaDegisti(p: Palet) = Unit
 
     override fun dakikaGecti() = yaz()
     override fun gosterildi() = yaz()

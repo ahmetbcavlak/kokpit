@@ -19,7 +19,10 @@ import java.util.Locale
  *  - Single zone: [Klima.sicaklik] is LEFT_TEMP only. RIGHT_TEMP is kept in the raw diagnostics: the unit
  *    is single-zone ("DUAL hep 0", the passenger side follows the driver's), so a second number on screen
  *    would only invite a difference that the car does not have; if LEFT_TEMP is missing the value is unknown.
- *  - Outside-temperature extra names: ASSUMED ([DIS_SICAKLIK]).
+ *  - Outside-temperature extra names: only the names the project has on record ([DIS_SICAKLIK]):
+ *    `hcn.air.outdoor_temp` (research notes, decision 15) and `ACTION_OUTDOOR_TEMP_DATA` (the other
+ *    outside-temperature name in Keşif's LiveProbe). Any other key is NOT read as a temperature
+ *    (K-74, no guessing from "temp", "value" or "the only extra"); it shows raw in [Teshis] only.
  * [Teshis.klimaHam] shows every raw key on the car, so names and encodings can be fixed after the first look.
  *
  * Rule: an unknown or out-of-range value becomes null, never a default "off" or 0.
@@ -39,11 +42,11 @@ object KlimaCozucu {
     const val AC = "KEY_VALUE_ACFLAG"
     const val OTO = "KEY_VALUE_BIGAUTOFLAG"
 
-    /** Assumed names for the outside temperature; the first three are also looked for inside ACTION_AIR_INFO. */
-    val DIS_SICAKLIK = listOf(
-        "hcn.air.outdoor_temp", "KEY_VALUE_OUTDOOR_TEMP", "KEY_VALUE_OUTSIDE_TEMP",
-        "outdoor_temp", "OUTDOOR_TEMP", "temp", "value",
-    )
+    /**
+     * The only extra names read as the outside temperature, in its own broadcasts and inside
+     * ACTION_AIR_INFO. Add a name here only after it has been seen carrying the value on the car.
+     */
+    val DIS_SICAKLIK = listOf(EYLEM_DIS_SICAKLIK, EYLEM_DIS_SICAKLIK_2)
 
     /** The keys that make a broadcast a climate state message. */
     private val KLIMA_ANAHTARLARI = listOf(SOL_SICAKLIK, SAG_SICAKLIK, FAN, AC, OTO)
@@ -75,15 +78,15 @@ object KlimaCozucu {
 
     /** Outside temperature inside ACTION_AIR_INFO, if one of the known names is present. */
     fun disSicaklikKlimadan(b: Bundle): Okunan? =
-        DIS_SICAKLIK.take(3).firstOrNull { b.containsKey(it) }?.let { Okunan(disSicaklik(deger(b, it))) }
+        DIS_SICAKLIK.firstOrNull { b.containsKey(it) }?.let { Okunan(disSicaklik(deger(b, it))) }
 
     /**
-     * Outside temperature from its own broadcast: a known extra name, or, failing that, the only
-     * extra of the bundle. null = nothing to read (the current value stays).
+     * Outside temperature from its own broadcast: only a known extra name ([DIS_SICAKLIK]).
+     * null = nothing to read (the current value stays); unknown extras are left to the raw diagnostics.
      */
     fun disSicaklikYayini(b: Bundle?): Okunan? {
         if (b == null || b.isEmpty) return null
-        val ad = DIS_SICAKLIK.firstOrNull { b.containsKey(it) } ?: b.keySet().singleOrNull() ?: return null
+        val ad = DIS_SICAKLIK.firstOrNull { b.containsKey(it) } ?: return null
         return Okunan(disSicaklik(deger(b, ad)))
     }
 

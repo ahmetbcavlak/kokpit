@@ -164,7 +164,8 @@ class EkranTest {
         AracVerisi.guncelle { kapiAcik(true) }
         assertEquals(UyariKatmani.Gorunum.PARK_BASLIGI, u.gorunum)
         assertTrue(u.metinler.toString(), u.metinler.contains("Kapı açık"))
-        assertTrue(metinler(Ekran.PARK).contains("Biri açık"))
+        assertTrue(metinler(Ekran.PARK).contains("Açık")) // not "Biri açık": which door is not known
+        assertFalse(metinler(Ekran.PARK).contains("Biri açık"))
         assertFalse(metinler(Ekran.PARK).contains("Gece mavisi")) // the warning takes the title's place
 
         AracVerisi.guncelle { kapiAcik(false) }
@@ -222,8 +223,7 @@ class EkranTest {
         AracVerisi.guncelle { kapiAcik(true); bagajAcik(true) }
         assertTrue(a.uyari.metinler.contains("Kapı ve bagaj açık"))
         val park = metinler(Ekran.PARK)
-        assertTrue(park.contains("Biri açık"))
-        assertTrue(park.contains("Açık"))
+        assertEquals(2, park.count { it == "Açık" }) // doors and boot
 
         AracVerisi.guncelle { bagajAcik(false) } // door still open: no confirmation, title follows
         assertEquals(UyariKatmani.Gorunum.PARK_BASLIGI, a.uyari.gorunum)
@@ -246,7 +246,7 @@ class EkranTest {
         c = TestYardim.acVeGec()
         AracVerisi.guncelle { kapiAcik(true); bagajAcik(false) }
         var m = metinler(Ekran.PARK)
-        assertTrue(m.contains("Biri açık"))
+        assertTrue(m.contains("Açık"))
         assertTrue(m.contains("Kapalı")) // boot reported closed
         AracVerisi.guncelle { bagajAcik(null) }
         m = metinler(Ekran.PARK)
@@ -413,5 +413,128 @@ class EkranTest {
         val surus = AracHaritasi.noktalar(AracHaritasi.Kare.SURUS_GECE)
         assertEquals(471f, surus.kapi!!.x, 0.6f)
         assertEquals(481f, surus.kapi!!.y, 0.6f)
+    }
+
+    // --- İ-4 ---
+
+    private fun tumMetinGorunumleri(v: View): List<android.widget.TextView> = when (v) {
+        is android.widget.TextView -> listOf(v)
+        is android.view.ViewGroup -> (0 until v.childCount).flatMap { tumMetinGorunumleri(v.getChildAt(it)) }
+        else -> emptyList()
+    }
+
+    /** The first visible long-press target of the warning layer (card or park title). */
+    private fun uzunBasmaHedefi(): View {
+        fun gez(v: View): View? {
+            if (v.visibility != View.VISIBLE) return null
+            if (v !== a.uyari && v.isLongClickable) return v
+            if (v is android.view.ViewGroup) for (i in 0 until v.childCount) gez(v.getChildAt(i))?.let { return it }
+            return null
+        }
+        return gez(a.uyari) ?: error("no long-press target")
+    }
+
+    @Test
+    fun acilisGunduzdeDeGeceRenkleri() {
+        Tema.zorla(Palet.GUNDUZ)
+        c = TestYardim.ac()
+        assertEquals(Ekran.ACILIS, e.gecerli)
+        val gece = setOf(Palet.GECE.tx, Palet.GECE.mu, Palet.GECE.hud)
+        fun renkler() = tumMetinGorunumleri(e.gorunum(Ekran.ACILIS).gorunum).map { it.currentTextColor }
+        assertTrue(renkler().isNotEmpty())
+        assertTrue(renkler().toString(), renkler().all { it in gece })
+        assertFalse(renkler().contains(Palet.GUNDUZ.tx)) // #0B0F16 on the night clip: black on black
+        // A theme change during the intro does not touch it either.
+        Tema.zorla(Palet.GECE)
+        Tema.zorla(Palet.GUNDUZ)
+        assertTrue(renkler().all { it in gece })
+    }
+
+    @Test
+    fun uzunBasmaKapiUyarisiniDegerDegisenekadarGizler() {
+        SahteVeri.uygula(SahteVeri.parkGece())
+        c = TestYardim.acVeGec()
+        val u = a.uyari
+        val isik = (a.katmanlar.altCubuk.parent as android.view.ViewGroup).getChildAt(1) as IsikCizgisi
+        AracVerisi.guncelle { kapiAcik(true) }
+        assertEquals(UyariKatmani.Gorunum.PARK_BASLIGI, u.gorunum)
+        assertEquals(IsikCizgisi.Mod.KAPI, isik.mod)
+        // A tap does nothing (only the long press hides).
+        uzunBasmaHedefi().performClick()
+        assertEquals(UyariKatmani.Gorunum.PARK_BASLIGI, u.gorunum)
+
+        assertTrue(uzunBasmaHedefi().performLongClick())
+        assertTrue(u.susturuldu)
+        assertEquals(UyariKatmani.Gorunum.YOK, u.gorunum)
+        assertEquals(IsikCizgisi.Mod.NORMAL, isik.mod)
+        assertTrue(metinler(Ekran.PARK).contains("Gece mavisi")) // the park title is back
+        assertTrue(metinler(Ekran.PARK).contains("Açık")) // the data itself is not hidden
+
+        // The same value again, or another field (speed, park/drive): still hidden.
+        AracVerisi.guncelle { kapiAcik(true) }
+        AracVerisi.guncelle { hiz(3.0) }
+        assertEquals(UyariKatmani.Gorunum.YOK, u.gorunum)
+        hal(HareketHali.SURUS)
+        assertEquals(Ekran.SURUS, e.gecerli)
+        assertEquals(UyariKatmani.Gorunum.YOK, u.gorunum)
+        assertEquals(IsikCizgisi.Mod.NORMAL, isik.mod)
+
+        // A door/boot VALUE change brings it back: the boot opens too.
+        AracVerisi.guncelle { bagajAcik(true) }
+        assertFalse(u.susturuldu)
+        assertEquals(UyariKatmani.Gorunum.KART, u.gorunum)
+        assertEquals(IsikCizgisi.Mod.ALARM, isik.mod)
+
+        // The drive card hides the same way, and closing brings the "closed" confirmation.
+        assertTrue(uzunBasmaHedefi().performLongClick())
+        assertEquals(UyariKatmani.Gorunum.YOK, u.gorunum)
+        AracVerisi.guncelle { kapiAcik(false); bagajAcik(false) }
+        assertFalse(u.susturuldu)
+        assertEquals(UyariKatmani.Gorunum.KAPANDI_KART, u.gorunum)
+    }
+
+    @Test
+    fun teshisKapiUyarisiniSifirlarYalnizUygulamaIci() {
+        SahteVeri.uygula(SahteVeri.parkGece())
+        c = TestYardim.acVeGec()
+        AracVerisi.guncelle { kapiAcik(true); bagajAcik(true) }
+        assertEquals(UyariKatmani.Gorunum.PARK_BASLIGI, a.uyari.gorunum)
+        a.katmanlar.kareHizi.performLongClick()
+        assertTrue(a.teshis.acik)
+        val oncekiYayinlar = shadowOf(app).broadcastIntents.size
+        val oncekiServisler = shadowOf(app).nextStartedService
+
+        a.teshis.sifirlaDugmesi.performClick()
+        TestYardim.bosalt()
+        assertNull(AracVerisi.durum.kapiAcik)
+        assertNull(AracVerisi.durum.bagajAcik)
+        assertEquals(UyariKatmani.Gorunum.YOK, a.uyari.gorunum) // unknown is not "closed": no confirmation
+        assertTrue(a.teshis.acik) // stays open to show the result
+        assertTrue(a.teshis.sifirlaDugmesi.text.startsWith("Sıfırlandı"))
+        // Nothing left the app: no broadcast, no service, no activity.
+        assertEquals(oncekiYayinlar, shadowOf(app).broadcastIntents.size)
+        assertNull(oncekiServisler)
+        assertNull(shadowOf(app).nextStartedService)
+        assertNull(shadowOf(a).nextStartedActivity)
+        // Next open shows the button text again.
+        a.teshis.kapat()
+        a.katmanlar.kareHizi.performLongClick()
+        assertEquals("Kapı uyarısını sıfırla — yalnız bu uygulamada, araca bir şey gönderilmez", a.teshis.sifirlaDugmesi.text.toString())
+    }
+
+    @Test
+    fun surusBaslayincaTeshisKapanir() {
+        c = TestYardim.acVeGec()
+        assertEquals(Ekran.PARK, e.gecerli)
+        a.katmanlar.kareHizi.performLongClick()
+        assertTrue(a.teshis.acik)
+        hal(HareketHali.SURUS) // from the park base screen
+        assertEquals(Ekran.SURUS, e.gecerli)
+        assertFalse(a.teshis.acik)
+
+        TestYardim.gecisleriBitir()
+        a.katmanlar.kareHizi.performLongClick()
+        hal(HareketHali.PARK) // stopping does not close it
+        assertTrue(a.teshis.acik)
     }
 }

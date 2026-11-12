@@ -44,8 +44,13 @@ import dev.kokpit.anaekran.veri.Teshis
  *    Not after the door service's 10 s time-out (Teshis.kapiZamanAsimi rose with the false):
  *    then the popup was only never heard of again, not seen closing.
  *  - During the intro nothing is shown (the warning comes when the park/drive screen is in front).
+ *  - Stuck warning: a LONG press on the card or the park title hides the open-door/boot warning
+ *    until the next change of the kapiAcik/bagajAcik VALUES ([susturuldu]); a long press, never
+ *    an edge gesture (K-66). The data is not touched — the park HUD still says "Açık" — and the
+ *    next real change (closed, the other one opens, unknown) brings the layer back.
  *
- * Nothing here is clickable except the confirmation (tap to dismiss): touches fall through.
+ * Nothing here is clickable except the confirmation (tap to dismiss) and the long-press targets
+ * (card, park title): touches elsewhere fall through.
  */
 @SuppressLint("ViewConstructor")
 class UyariKatmani(
@@ -60,6 +65,12 @@ class UyariKatmani(
     private var oncekiKapi: Boolean? = null
     private var oncekiBagaj: Boolean? = null
     private var sonZamanAsimi = zamanAsimiSayaci()
+
+    /** True while the user has hidden the open-door/boot warning (long press). */
+    var susturuldu = false
+        private set
+    private var susturulanKapi: Boolean? = null
+    private var susturulanBagaj: Boolean? = null
 
     /** What is shown now (tests, MainActivity's light line). */
     enum class Gorunum { YOK, PARK_BASLIGI, KART, KAPANDI_PARK, KAPANDI_KART }
@@ -79,11 +90,11 @@ class UyariKatmani(
     private val cizim = Cizim(context) { ciz(it) }
 
     // Y-4 / Y-10 title block
-    private val parkBaslik = context.metin(Yazi.sansOrta, 34, palet.tx, -0.015f)
-    private val parkAlt = context.metin(Yazi.sans, 16, palet.mu)
+    private val parkBaslik = context.metin(Yazi.sansOrta, 34, palet.tx, -0.015f).apply { susturmaHedefi() }
+    private val parkAlt = context.metin(Yazi.sans, 16, palet.mu).apply { susturmaHedefi() }
 
     // Y-14 card
-    private val kart = MutlakDuzen(context)
+    private val kart = MutlakDuzen(context).apply { susturmaHedefi() }
     private val kartSimge = ImageView(context).apply { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
     private val kartBaslik = context.metin(Yazi.sansOrta, 26, palet.tx)
     private val kartAlt = context.metin(Yazi.sans, 16, palet.mu)
@@ -118,8 +129,30 @@ class UyariKatmani(
         gizle()
     }
 
+    private fun android.view.View.susturmaHedefi() {
+        setOnLongClickListener {
+            sustur()
+            true
+        }
+    }
+
+    /** Long press: hide the open-door/boot warning until kapiAcik or bagajAcik changes value. */
+    fun sustur() {
+        val d = durum
+        if (d.kapiAcik != true && d.bagajAcik != true) return
+        susturuldu = true
+        susturulanKapi = d.kapiAcik
+        susturulanBagaj = d.bagajAcik
+        yenile()
+    }
+
     /** New data and/or a new screen in front. */
     fun guncelle(d: AracDurumu, e: Ekran?) {
+        if (susturuldu && (d.kapiAcik != susturulanKapi || d.bagajAcik != susturulanBagaj)) {
+            susturuldu = false
+            susturulanKapi = null
+            susturulanBagaj = null
+        }
         // A record the service dropped by its 10 s time-out (popup never seen in the window list)
         // also turns true into false, but nobody saw it close: the warning goes without "kapandı".
         val sayac = zamanAsimiSayaci()
@@ -157,16 +190,18 @@ class UyariKatmani(
 
     private fun yenile() {
         val once = gorunum
+        val onceSusturuldu = susturuldu
         yenileIc()
-        if (gorunum != once) degisti?.invoke(gorunum)
+        if (gorunum != once || susturuldu != onceSusturuldu) degisti?.invoke(gorunum)
     }
 
     private fun yenileIc() {
         val d = durum
         val e = ekran
         val c = context
-        val kapi = d.kapiAcik == true
-        val bagaj = d.bagajAcik == true
+        // Hidden by a long press: the open state is not shown until a value changes.
+        val kapi = d.kapiAcik == true && !susturuldu
+        val bagaj = d.bagajAcik == true && !susturuldu
         gizle()
         halka = null
         isilti = false

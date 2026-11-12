@@ -117,7 +117,7 @@ class ParkEkrani(
         )
         kapilar.deger.yaz(
             when (d.kapiAcik) {
-                true -> c.getString(R.string.biri_acik)
+                true -> c.getString(R.string.acik) // which door, or how many, is not known
                 false -> c.getString(R.string.kapali)
                 null -> Bicim.YOK
             },
@@ -147,8 +147,18 @@ class ParkEkrani(
             baslikGorunurlugu()
         }
 
+    /**
+     * Set by MainActivity: true while the user has hidden the door/boot warning with a long press
+     * (UyariKatmani.susturuldu). Then the open door no longer hides the title on its own.
+     */
+    var uyariSusturuldu = false
+        set(v) {
+            field = v
+            baslikGorunurlugu()
+        }
+
     private fun baslikGorunurlugu() {
-        val gizli = baslikUyarida || durum.kapiAcik == true || durum.bagajAcik == true
+        val gizli = baslikUyarida || (!uyariSusturuldu && (durum.kapiAcik == true || durum.bagajAcik == true))
         val b = if (gizli) View.INVISIBLE else View.VISIBLE
         if (baslik.visibility != b) baslik.visibility = b
         val a = if (gizli || alt.text.isNullOrEmpty()) View.INVISIBLE else View.VISIBLE

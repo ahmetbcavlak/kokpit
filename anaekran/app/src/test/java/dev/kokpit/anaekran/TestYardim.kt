@@ -35,6 +35,7 @@ object TestYardim {
      */
     fun esZamanli() {
         Arkaplan.yurutucu = Executor { it.run() }
+        dev.kokpit.anaekran.uygulama.UygulamaListesi.yurutucu = Executor { it.run() }
         oynaticilar.clear()
         Baglayicilar.uret = { listOf(sahteHareket()) }
         Ipuclari.sifirla()

@@ -9,6 +9,8 @@ import dev.kokpit.anaekran.ekran.Gecis
  * Screen change: old view alpha 1 → 0, new view alpha 0 → 1 rising a few pixels, [sureMs]
  * (default 220 ms). Alpha and translation only, both run on hardware layers (withLayer():
  * screens are many overlapping views — glass, text — so a layer is both correct and cheap).
+ * A view not measured yet (the first screen change, width or height 0) animates without a
+ * layer: View.buildLayer on a 0-size view only logs "Incorrectly called buildLayer" and drops it.
  *
  * Contract (ekran.Gecis): at the end the old view is GONE with alpha 1 / translation 0 (ready
  * to be shown again), the new view is VISIBLE with alpha 1, and `bitti` is called exactly once.
@@ -49,14 +51,14 @@ class YumusakGecis(
         e?.let {
             it.animate().cancel()
             it.visibility = View.VISIBLE
-            it.animate().alpha(0f).setDuration(sureMs).setInterpolator(EGRI).withLayer().start()
+            it.animate().alpha(0f).setDuration(sureMs).setInterpolator(EGRI).katmanla(it).start()
         }
         yeni.animate()
             .alpha(1f)
             .translationY(0f)
             .setDuration(sureMs)
             .setInterpolator(EGRI)
-            .withLayer()
+            .katmanla(yeni)
             .withEndAction { if (calisan === c) tamamla(c) }
             .start()
     }
@@ -80,6 +82,10 @@ class YumusakGecis(
             c.bitti()
         }
     }
+
+    /** withLayer() only for a measured view (the one condition, see the class notes). */
+    private fun android.view.ViewPropertyAnimator.katmanla(v: View) =
+        if (v.width > 0 && v.height > 0) withLayer() else this
 
     companion object {
         const val SURE_MS = 220L

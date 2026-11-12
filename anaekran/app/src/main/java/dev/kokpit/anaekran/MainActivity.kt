@@ -40,7 +40,9 @@ import dev.kokpit.anaekran.hareket.Goruntu
 import dev.kokpit.anaekran.hareket.HareketBaglayici
 import dev.kokpit.anaekran.hareket.Klip
 import dev.kokpit.anaekran.hareket.KlipOynatici
+import dev.kokpit.anaekran.tema.Gunes
 import dev.kokpit.anaekran.tema.Palet
+import dev.kokpit.anaekran.tema.SonKonum
 import dev.kokpit.anaekran.tema.Tema
 import dev.kokpit.anaekran.tema.TemaDinleyici
 import dev.kokpit.anaekran.tema.Yazi
@@ -50,6 +52,7 @@ import dev.kokpit.anaekran.veri.AracDurumu
 import dev.kokpit.anaekran.veri.AracVerisi
 import dev.kokpit.anaekran.veri.ErisilebilirlikDurumu
 import dev.kokpit.anaekran.veri.HareketHali
+import dev.kokpit.anaekran.veri.KapiServisi
 import dev.kokpit.anaekran.veri.Teshis
 import dev.kokpit.anaekran.veri.VeriBaglayici
 
@@ -119,6 +122,10 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Day/night follows the sun at the last GPS fix (read-only), else Istanbul; checked every minute.
+        val uyg = applicationContext
+        Tema.konum = { SonKonum.oku(uyg) }
+        Tema.kontrolEt()
         Olcek.kur(resources.displayMetrics.widthPixels)
         Yazi.yukle(resources)
         AracHaritasi.yukle(this)
@@ -202,7 +209,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         kok.addView(kareHizi, FrameLayout.LayoutParams(u(KARE_HIZI_GENISLIK), u(KARE_HIZI_YUKSEKLIK), Gravity.TOP or Gravity.END))
 
         // 7. Diagnostics, above everything, hidden.
-        teshis = TeshisPaneli(this, ::teshisSatirlari)
+        teshis = TeshisPaneli(this, ::teshisSatirlari, ::kapiUyarisiniSifirla)
         kok.addView(teshis, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         val yonetici = EkranYoneticisi(ekranKap, ::ekranUret)
@@ -252,6 +259,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     @Suppress("UNUSED_PARAMETER")
     private fun acilisiBitir(s: KlipOynatici.Sonuc?) {
         acilisSuruyor = false
+        if (acilisHedefi == Ekran.SURUS) teshis.kapat()
         ekranlar.goster(acilisHedefi)
         val d = AracVerisi.durum
         if (d.hareketHali != uygulananHal) hareketHaliDegisti(d.hareketHali) else sahneyiGuncelle()
@@ -329,14 +337,13 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             HareketHali.PARK -> Ekran.PARK
             null -> return // unknown: the screen stays
         }
+        // Driving: the diagnostics panel (full-screen, over everything) never stays over the road.
+        if (hedef == Ekran.SURUS) teshis.kapat()
         val g = ekranlar.gecerli ?: return
         when {
             g == Ekran.ACILIS -> return
             g.temel -> ekranlar.goster(hedef)
-            hedef == Ekran.SURUS -> {
-                teshis.kapat()
-                ekranlar.goster(Ekran.SURUS)
-            }
+            hedef == Ekran.SURUS -> ekranlar.goster(Ekran.SURUS)
             else -> ekranlar.temeliAyarla(Ekran.PARK)
         }
     }
@@ -418,14 +425,26 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     private fun uyariDegisti() {
-        (ekranlar.kurulduysa(Ekran.PARK) as? ParkEkrani)?.baslikUyarida = uyari.parkBasliginiKullaniyor
+        (ekranlar.kurulduysa(Ekran.PARK) as? ParkEkrani)?.let {
+            it.uyariSusturuldu = uyari.susturuldu
+            it.baslikUyarida = uyari.parkBasliginiKullaniyor
+        }
+        isikGuncelle()
+    }
+
+    /**
+     * Diagnostics' "Kapı uyarısını sıfırla": in-app memory only (the door service's records, the
+     * shared kapiAcik/bagajAcik → null). Nothing goes to the car or the system (K-29).
+     */
+    private fun kapiUyarisiniSifirla() {
+        KapiServisi.uygulamaIciSifirla()
     }
 
     /** The light line points at what needs attention (IsikCizgisi.Mod). */
     private fun isikGuncelle() {
         val d = AracVerisi.durum
         val g = ekranlar.gecerli
-        val acik = d.kapiAcik == true || d.bagajAcik == true
+        val acik = (d.kapiAcik == true || d.bagajAcik == true) && !uyari.susturuldu
         isik.modUygula(
             when {
                 g == null || g == Ekran.ACILIS || !acik -> IsikCizgisi.Mod.NORMAL
@@ -452,7 +471,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         return listOf(
             getString(R.string.teshis_baslik, pi?.versionName ?: "?", kod),
             "Ekran: ${dm.widthPixels}×${dm.heightPixels} px · ${dm.densityDpi} dpi (yoğunluk ${dm.density}) · u() ölçeği ${String.format(java.util.Locale.ROOT, "%.3f", Olcek.oran)}",
-            "Görünüm: ${ekranlar.gecerli} (temel ${ekranlar.temel}) · tema ${Tema.palet.ad} · uyarı ${uyari.gorunum} · ışık ${isik.mod}",
+            "Görünüm: ${ekranlar.gecerli} (temel ${ekranlar.temel}) · tema ${Tema.palet.ad} · uyarı ${uyari.gorunum}${if (uyari.susturuldu) " (gizlendi)" else ""} · ışık ${isik.mod}",
+            temaSatiri(),
             "Araç: hareket ${d.hareketHali ?: "?"} · hız ${d.hiz ?: "—"} · kapı ${d.kapiAcik ?: "?"} · bagaj ${d.bagajAcik ?: "?"} · dış ${d.disSicaklik ?: "—"}",
             "Klima (çözülen): ${d.klima ?: "—"}",
             "Erişilebilirlik servisi ayarı: ${if (ErisilebilirlikDurumu.etkinMi(this)) "açık" else "kapalı"}",
@@ -461,6 +481,19 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             "Kare hızı sayacı: ${hareket?.sayac?.text ?: "—"}",
             "",
         ) + Teshis.satirlar()
+    }
+
+    private fun temaSatiri(): String {
+        val k = Tema.gecerliKonum()
+        val g = Gunes.gun(System.currentTimeMillis(), k.enlem, k.boylam)
+        val f = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT)
+        val kaynak = if (k == Tema.ISTANBUL) "varsayılan İstanbul" else "son GPS"
+        val gun = when (g.tur) {
+            Gunes.Tur.NORMAL -> "doğum ${f.format(java.util.Date(g.dogum!!))} · batım ${f.format(java.util.Date(g.batim!!))}"
+            Gunes.Tur.KUTUP_GECESI -> "güneş doğmuyor"
+            Gunes.Tur.GECE_YARISI_GUNESI -> "güneş batmıyor"
+        }
+        return "Tema: $gun · konum $kaynak (${String.format(java.util.Locale.ROOT, "%.2f, %.2f", k.enlem, k.boylam)})"
     }
 
     // --- Lifecycle ---

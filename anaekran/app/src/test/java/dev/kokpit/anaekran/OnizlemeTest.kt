@@ -154,6 +154,20 @@ class OnizlemeTest {
         cek(a, "15-surus-62-gunduz")
 
         c.pause().stop().destroy()
+
+        // Intro by day (İ-4): the clip and its last frame are night pictures, so Y-1 keeps the night
+        // palette — light text, not the day palette's dark ink.
+        AracVerisi.sifirla()
+        SahteVeri.uygula(SahteVeri.parkGece())
+        val c2 = TestYardim.ac()
+        val a2 = c2.get()
+        assertEquals(Ekran.ACILIS, a2.katmanlar.ekranlar.gecerli)
+        assertEquals(Palet.GUNDUZ, Tema.palet)
+        val sonKare2 = android.widget.ImageView(a2).apply { setImageResource(R.drawable.sahne_karsilama) }
+        a2.katmanlar.video.addView(sonKare2)
+        cek(a2, "16-acilis-gunduz")
+        a2.katmanlar.video.removeView(sonKare2)
+        c2.pause().stop().destroy()
     }
 
     private fun cek(a: MainActivity, ad: String) {

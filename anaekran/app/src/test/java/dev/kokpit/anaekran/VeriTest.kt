@@ -26,7 +26,8 @@ class VeriTest {
     fun temizle() {
         AracVerisi.sifirla()
         AracVerisi.saat = { android.os.SystemClock.elapsedRealtime() }
-        Tema.saat = { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
+        Tema.simdi = { System.currentTimeMillis() }
+        Tema.konum = { null }
         Tema.zorla(null)
     }
 
@@ -85,27 +86,78 @@ class VeriTest {
         assertEquals("—", Bicim.derece(null))
     }
 
+    private fun an(g: Int, s: Int, dk: Int, ay: Int = 11) =
+        java.time.ZonedDateTime.of(2026, ay, g, s, dk, 0, 0, java.time.ZoneOffset.ofHours(3)).toInstant().toEpochMilli()
+
+    /**
+     * K-88 (İ-4): day = sunrise ≤ now < sunset, no longer 07–19. Istanbul 13 Nov 2026: rise 07:49,
+     * set 17:47 (USNO, see tema.GunesTest).
+     */
     @Test
     fun gunduzGeceKurali() {
-        assertTrue(!Tema.gunduzMu(6))
-        assertTrue(Tema.gunduzMu(7))
-        assertTrue(Tema.gunduzMu(18))
-        assertTrue(!Tema.gunduzMu(19))
-        assertTrue(!Tema.gunduzMu(0))
-
-        var saat = 6
-        Tema.saat = { saat }
+        Tema.konum = { null } // no GPS fix: Istanbul
+        var simdi = an(13, 7, 30)
+        Tema.simdi = { simdi }
         Tema.kontrolEt()
-        assertEquals(Palet.GECE, Tema.palet)
+        assertEquals(Palet.GECE, Tema.palet) // the old rule said day at 07:30
+        assertEquals(Tema.ISTANBUL, Tema.gecerliKonum())
+
         var duyulan: Palet? = null
         val d = dev.kokpit.anaekran.tema.TemaDinleyici { duyulan = it }
         Tema.dinle(d)
-        saat = 7
+        simdi = an(13, 8, 0)
         Tema.kontrolEt()
         assertEquals(Palet.GUNDUZ, duyulan)
         duyulan = null
         Tema.kontrolEt()
         assertNull(duyulan) // no change, no event
+
+        simdi = an(13, 17, 40)
+        Tema.kontrolEt()
+        assertNull(duyulan) // still day
+        simdi = an(13, 17, 55)
+        Tema.kontrolEt()
+        assertEquals(Palet.GECE, duyulan) // after sunset; the old rule kept day until 19:00
+
+        // Summer: 20:30 in June is still day in Istanbul.
+        simdi = an(21, 20, 30, ay = 6)
+        Tema.kontrolEt()
+        assertEquals(Palet.GUNDUZ, Tema.palet)
         Tema.birak(d)
+    }
+
+    @Test
+    fun temaSonGpsKonumunuKullanir() {
+        // 13 Nov 17:20: still day in Istanbul (set 17:47), already night in Van (≈38.5 N 43.4 E, set ≈ 16:50).
+        Tema.simdi = { an(13, 17, 20) }
+        Tema.konum = { null }
+        Tema.kontrolEt()
+        assertEquals(Palet.GUNDUZ, Tema.palet)
+        Tema.konum = { Tema.Konum(38.50, 43.38) }
+        Tema.kontrolEt()
+        assertEquals(Palet.GECE, Tema.palet)
+
+        // Unusable fixes and a failing source fall back to Istanbul, never crash.
+        for (k in listOf(Tema.Konum(0.0, 0.0), Tema.Konum(Double.NaN, 29.0), Tema.Konum(95.0, 29.0), Tema.Konum(41.0, 200.0))) {
+            Tema.konum = { k }
+            assertEquals(Tema.ISTANBUL, Tema.gecerliKonum())
+        }
+        Tema.konum = { throw SecurityException("izin yok") }
+        assertEquals(Tema.ISTANBUL, Tema.gecerliKonum())
+        Tema.kontrolEt()
+        assertEquals(Palet.GUNDUZ, Tema.palet)
+    }
+
+    @Test
+    fun sonKonumIzinsizVeIzinliOkur() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        // No permission: null, and the location service is not even asked.
+        assertNull(dev.kokpit.anaekran.tema.SonKonum.oku(app))
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        assertNull(dev.kokpit.anaekran.tema.SonKonum.oku(app)) // no fix yet
+        val lm = app.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val l = android.location.Location(android.location.LocationManager.GPS_PROVIDER).apply { latitude = 40.99; longitude = 29.03 }
+        org.robolectric.Shadows.shadowOf(lm).setLastKnownLocation(android.location.LocationManager.GPS_PROVIDER, l)
+        assertEquals(Tema.Konum(40.99, 29.03), dev.kokpit.anaekran.tema.SonKonum.oku(app))
     }
 }

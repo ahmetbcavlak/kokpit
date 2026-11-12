@@ -61,6 +61,7 @@ class KapiServisi : AccessibilityService() {
 
     /** Public so tests can call it as the system does. */
     public override fun onServiceConnected() {
+        sifirlayici = kendiSifirlayicisi
         Teshis.kapiServisiBagli = true
         Teshis.kapiOlayi("servis bağlandı")
         // A popup already on screen is picked up at once. No popup leaves both flags unknown (null):
@@ -202,12 +203,34 @@ class KapiServisi : AccessibilityService() {
         isciHandler?.post(sarili)
     }
 
+    /**
+     * The diagnostics panel's "Kapı uyarısını sıfırla": forgets this instance's in-memory records and
+     * last written values on the worker, then writes "unknown" in order after any write already posted.
+     * Memory only — no window, node or system call.
+     */
+    private val kendiSifirlayicisi = Runnable {
+        calistir {
+            yorumlayici.sifirla()
+            sonKapi = null
+            sonBagaj = null
+            Teshis.kapiOlayi("uygulama içi sıfırlama")
+            val n = nesil
+            AracVerisi.guncelle {
+                if (n == etkinNesil) {
+                    kapiAcik(null)
+                    bagajAcik(null)
+                }
+            }
+        }
+    }
+
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         // Switched off (or the app updated): the door state is no longer known — not "closed".
         // A newer generation makes every write still queued from this instance a no-op.
         etkinNesil++
+        if (sifirlayici === kendiSifirlayicisi) sifirlayici = null
         Teshis.kapiServisiBagli = false
         Teshis.kapiOlayi("servis durdu")
         calistir { yorumlayici.sifirla() }
@@ -228,5 +251,20 @@ class KapiServisi : AccessibilityService() {
         @Volatile internal var gecikmeli: ((Long, Runnable) -> Unit)? = null
         /** Generation of the live service instance (changes in onCreate and onDestroy). */
         @Volatile internal var etkinNesil = 0
+
+        /** The connected instance's reset (a Runnable, not the Service itself: no static Context). */
+        @Volatile private var sifirlayici: Runnable? = null
+
+        /**
+         * Clears the door/boot state inside the app (any thread): the running service's records, if it
+         * is connected, and the shared state's kapiAcik/bagajAcik (→ null, unknown). Sends nothing.
+         */
+        fun uygulamaIciSifirla() {
+            sifirlayici?.run()
+            AracVerisi.guncelle {
+                kapiAcik(null)
+                bagajAcik(null)
+            }
+        }
     }
 }
