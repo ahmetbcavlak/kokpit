@@ -16,6 +16,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.time.Duration
 import java.util.concurrent.Executor
 
 /** Door/boot from com.hcn.autocan's popup, with fake accessibility events and windows. */
@@ -26,14 +27,18 @@ class KapiTest {
     private val AUTOCAN = KapiMetni.PAKET
     private val BASKA = "com.example.baska"
 
+    private val gecikenler = ArrayList<Runnable>()
+
     @Before
     fun hazirla() {
         KapiServisi.yurutucu = Executor { it.run() }
+        KapiServisi.gecikmeli = { _, r -> gecikenler += r }
     }
 
     @After
     fun temizle() {
         KapiServisi.yurutucu = null
+        KapiServisi.gecikmeli = null
         AracVerisi.sifirla()
         Teshis.sifirla()
     }
@@ -54,6 +59,25 @@ class KapiTest {
         assertEquals(KapiMetni.Okunan(kapi = false, bagaj = true), KapiMetni.sinifla(listOf(null, "Bagaj açık")))
         assertEquals(KapiMetni.Okunan(kapi = true, bagaj = true), KapiMetni.sinifla(listOf("Kapı açık", "Bagaj açık")))
         assertTrue(KapiMetni.sinifla(listOf("display door info: Open", "Kapı kapalı", "")).bos)
+    }
+
+    @Test
+    fun metinSozcukTabanli() {
+        val kapi = KapiMetni.Okunan(kapi = true, bagaj = false)
+        val bagaj = KapiMetni.Okunan(kapi = false, bagaj = true)
+        assertEquals(kapi, KapiMetni.sinifla(listOf("Kapılar açık")))
+        assertEquals(kapi, KapiMetni.sinifla(listOf("KAPILAR AÇIK!")))
+        assertEquals(bagaj, KapiMetni.sinifla(listOf("Bagaj kapağı açık")))
+        assertEquals(bagaj, KapiMetni.sinifla(listOf("Bagaj kapısı açık"))) // boot lid, not a door
+        // Words split over nodes: the window's texts joined once more.
+        assertEquals(kapi, KapiMetni.sinifla(listOf("Kapı", "açık")))
+        assertEquals(bagaj, KapiMetni.sinifla(listOf("Bagaj", null, "AÇIK")))
+        assertEquals(KapiMetni.Okunan(kapi = true, bagaj = true), KapiMetni.sinifla(listOf("Kapı ve bagaj açık")))
+        // Closed / unrelated texts are not "open".
+        assertTrue(KapiMetni.sinifla(listOf("Kapı kapalı")).bos)
+        assertTrue(KapiMetni.sinifla(listOf("Kapı", "kapalı")).bos)
+        assertTrue(KapiMetni.sinifla(listOf("Kapak açık")).bos)
+        assertTrue(KapiMetni.sinifla(listOf("açık")).bos)
     }
 
     // --- Interpreter ---
@@ -113,13 +137,52 @@ class KapiTest {
     }
 
     @Test
-    fun yorumlayici_listedeGorulmeyenPencereKapanmaz() {
-        val y = KapiYorumlayici()
+    fun yorumlayici_listedeGorulmeyenKayit_onSaniyeSonraDuser() {
+        var t = 0L
+        val y = KapiYorumlayici { t }
         y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Kapı açık"), 11)
-        y.pencereler(emptyList()) // never listed (research decision 7): no time-out, stays open
-        y.pencereler(emptyList())
+        assertTrue(y.dogrulanmamisVar())
+        t = 5_000
+        y.pencereler(emptyList()) // never listed (research decision 7): kept for now
         assertEquals(true, y.kapiAcik())
         assertEquals(1, Teshis.listeDisiPencere)
+        t = 10_000
+        y.pencereler(emptyList())
+        assertEquals(false, y.kapiAcik())
+        assertEquals(1, Teshis.kapiZamanAsimi)
+    }
+
+    @Test
+    fun yorumlayici_listedeDogrulanmisKayitZamanAsimiYok() {
+        var t = 0L
+        val y = KapiYorumlayici { t }
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        t = 600_000 // ten minutes with the door open
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        y.pencereler(emptyList(), okunamayan = setOf(7))
+        assertEquals(true, y.kapiAcik())
+        assertEquals(0, Teshis.kapiZamanAsimi)
+    }
+
+    @Test
+    fun yorumlayici_listeOlaydanOnceGelirse_takilmaz() {
+        // TYPE_WINDOWS_CHANGED pass first (window without text yet), then the state event.
+        val y = KapiYorumlayici { 0L }
+        y.pencereler(listOf(p(7)))
+        y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Kapı açık"), 7)
+        assertEquals(true, y.kapiAcik())
+        assertFalse(y.dogrulanmamisVar()) // counted as listed: the id was in the last list
+        y.pencereler(emptyList())
+        assertEquals(false, y.kapiAcik())
+    }
+
+    @Test
+    fun yorumlayici_ayniPencereKapidanBagaja() {
+        val y = KapiYorumlayici { 0L }
+        y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Kapı açık"), 7)
+        y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Bagaj açık"), 7)
+        assertEquals(false, y.kapiAcik())
+        assertEquals(true, y.bagajAcik())
     }
 
     // --- The service with Robolectric's accessibility shadows ---
@@ -193,6 +256,71 @@ class KapiTest {
         bosalt()
         assertNull(AracVerisi.durum.kapiAcik)
         assertNull(AracVerisi.durum.bagajAcik)
+    }
+
+    @Test
+    fun servis_baglanincaAcikPencereyiGorur() {
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        shadowOf(s).setWindows(listOf(pencere(4, BASKA), pencere(9, AUTOCAN, "Bagaj", "açık")))
+        s.onServiceConnected()
+        bosalt()
+        assertTrue(Teshis.kapiServisiBagli)
+        assertEquals(true, AracVerisi.durum.bagajAcik)
+        assertNull(AracVerisi.durum.kapiAcik) // the boot popup says nothing about the doors
+    }
+
+    @Test
+    fun servis_ayniPenceredeOlayIleKapidanBagaja() {
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        val sh = shadowOf(s)
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Bagaj açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Bagaj açık", 7))
+        bosalt()
+        assertEquals(false, AracVerisi.durum.kapiAcik)
+        assertEquals(true, AracVerisi.durum.bagajAcik)
+
+        // The first event came before any list pass, so a delayed pass was scheduled. The record has
+        // been confirmed by the list since: that pass must not drop it, however late it runs.
+        assertTrue(gecikenler.isNotEmpty())
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(60_000))
+        gecikenler.toList().forEach { it.run() }
+        bosalt()
+        assertEquals(true, AracVerisi.durum.bagajAcik)
+    }
+
+    @Test
+    fun servis_listedeGorulmeyenPencere_gecikmeliTaramaIleDuser() {
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        shadowOf(s).setWindows(emptyList()) // popup not interactive: never in the list
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 11))
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+        assertEquals(1, gecikenler.size)
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(KapiYorumlayici.ZAMAN_ASIMI_MS + 500))
+        gecikenler.removeAt(0).run()
+        bosalt()
+        assertEquals(false, AracVerisi.durum.kapiAcik)
+    }
+
+    @Test
+    fun servis_yokEdildiktenSonraBekleyenYazmaDusurulur() {
+        // Worker jobs held back, as if still queued when the system destroys the service.
+        val kuyruk = ArrayList<Runnable>()
+        KapiServisi.yurutucu = Executor { kuyruk += it }
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        shadowOf(s).setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        s.onDestroy()
+        bosalt()
+        assertNull(AracVerisi.durum.kapiAcik)
+        kuyruk.toList().forEach { it.run() } // the late worker jobs
+        bosalt()
+        assertNull(AracVerisi.durum.kapiAcik) // still unknown, not "open"
     }
 
     @Test

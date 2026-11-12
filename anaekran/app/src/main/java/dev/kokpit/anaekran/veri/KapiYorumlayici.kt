@@ -1,5 +1,6 @@
 package dev.kokpit.anaekran.veri
 
+import android.os.SystemClock
 import java.util.Locale
 
 /** The words of the vendor's door popup, in one place. */
@@ -8,11 +9,13 @@ object KapiMetni {
     /** The vendor app that shows the door/boot popup (CanDoorWindow). */
     const val PAKET = "com.hcn.autocan"
 
-    /** Compared after [sade]: lower case, Turkish letters folded to ASCII, single spaces. */
-    val KAPI = listOf("kapi acik")
-    val BAGAJ = listOf("bagaj acik")
+    /** Word stems, compared after [sade]: "kapı", "kapılar", "kapısı" → kapi…; "bagaj" → bagaj…; "açık" → acik…. */
+    const val KAPI_KOKU = "kapi"
+    const val BAGAJ_KOKU = "bagaj"
+    const val ACIK_KOKU = "acik"
 
     private val TR = Locale("tr")
+    private val KELIME = Regex("""[\p{L}\p{N}]+""")
 
     /**
      * "KAPI AÇIK", "Kapı açık", "kapi acik", "KAPİ AÇIK" all become "kapi acik". Turkish lower-casing
@@ -39,21 +42,38 @@ object KapiMetni {
         return b.toString().trimEnd()
     }
 
-    /** What a set of texts says: door words and boot words are independent (both may appear). */
-    fun sinifla(metinler: Iterable<CharSequence?>): Okunan {
+    /**
+     * One text, word by word: a door word (kapi…) and an "açık" word in the same text means a door is
+     * open; a boot word (bagaj…) and "açık" the boot. "Kapı kapalı" has no "açık" and says nothing.
+     * A door word right after "bagaj" is the boot lid ("bagaj kapısı açık"), not a door.
+     */
+    private fun oku(metin: String): Okunan {
+        val k = KELIME.findAll(sade(metin)).map { it.value }.toList()
+        if (k.none { it.startsWith(ACIK_KOKU) }) return Okunan(kapi = false, bagaj = false)
         var kapi = false
         var bagaj = false
-        for (m in metinler) {
-            if (m.isNullOrBlank()) continue
-            val s = sade(m)
-            if (KAPI.any { s.contains(it) }) kapi = true
-            if (BAGAJ.any { s.contains(it) }) bagaj = true
+        for ((i, w) in k.withIndex()) {
+            if (w.startsWith(BAGAJ_KOKU)) bagaj = true
+            else if (w.startsWith(KAPI_KOKU) && !(i > 0 && k[i - 1].startsWith(BAGAJ_KOKU))) kapi = true
         }
         return Okunan(kapi, bagaj)
     }
 
+    /**
+     * What the texts of one window say: each text on its own, and all of them joined once more, so words
+     * split over several nodes (["Kapı", "açık"]) still match. Door and boot are independent.
+     */
+    fun sinifla(metinler: Iterable<CharSequence?>): Okunan {
+        val dolu = metinler.filterNotNull().map { it.toString() }.filter { it.isNotBlank() }
+        var sonuc = Okunan(kapi = false, bagaj = false)
+        for (m in dolu) sonuc += oku(m)
+        if (dolu.size > 1) sonuc += oku(dolu.joinToString(" "))
+        return sonuc
+    }
+
     data class Okunan(val kapi: Boolean, val bagaj: Boolean) {
         val bos: Boolean get() = !kapi && !bagaj
+        operator fun plus(o: Okunan) = Okunan(kapi || o.kapi, bagaj || o.bagaj)
     }
 }
 
@@ -66,24 +86,27 @@ object KapiMetni {
  *
  * Sources (research decisions 6 and 7):
  *  1. TYPE_WINDOW_STATE_CHANGED from com.hcn.autocan: the event's own text and class name. Opens a
- *     record for the event's window id; this is the fallback when getWindows() does not list the popup.
+ *     record for the event's window id. If that id was in the last window list (even without text,
+ *     e.g. the list pass ran just before the event), the record counts as listed at once.
  *  2. TYPE_WINDOWS_CHANGED → getWindows(): the com.hcn.autocan windows on screen and their text.
  *     A window that was listed and is no longer listed has closed → its record goes.
  *
- * No time-out in 0.1: a record that was never listed stays until a list shows it and it goes away
- * (or the service stops). A false "closed" while a door is open is the worse error; Keşif 0.6 saw the
- * popup open and close through the window list on the car. [Teshis.listeDisiPencere] counts the
- * other case so the first test shows it.
+ * Time-out only for records that were NEVER seen in the window list (popup not interactive,
+ * decision 7): from [ZAMAN_ASIMI_MS] after their last event, the next pass drops them. A record
+ * confirmed by the list never times out, so a door that stays open is not called closed by a timer
+ * (Keşif 0.6 saw the popup open and close through the window list on the car).
  */
-class KapiYorumlayici {
+class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealtime() }) {
 
     /** A window as the service saw it: id, package, class name, texts (node text and descriptions). */
     data class Pencere(val id: Int, val paket: String?, val sinif: String?, val metinler: List<CharSequence?>)
 
-    private class Kayit(var okunan: KapiMetni.Okunan, var sinif: String, var listede: Boolean)
+    private class Kayit(var okunan: KapiMetni.Okunan, var sinif: String, var listede: Boolean, var sonOlay: Long)
 
     private val kayitlar = LinkedHashMap<Int, Kayit>()
     private val listeDisiSayilan = HashSet<Int>()
+    /** com.hcn.autocan window ids of the last list pass, with or without text. */
+    private var sonListe: Set<Int> = emptySet()
     private var kapiGoruldu = false
     private var bagajGoruldu = false
 
@@ -101,17 +124,22 @@ class KapiYorumlayici {
         else -> null
     }
 
-    private fun kaydet(id: Int, okunan: KapiMetni.Okunan, sinif: String?, listede: Boolean) {
+    /** Some record waits for the window list to confirm it (the service then schedules a later pass). */
+    fun dogrulanmamisVar(): Boolean = kayitlar.values.any { !it.listede }
+
+    private fun kaydet(id: Int, okunan: KapiMetni.Okunan, sinif: String?, listede: Boolean, olay: Boolean) {
         if (okunan.bos) return
         if (okunan.kapi) kapiGoruldu = true
         if (okunan.bagaj) bagajGoruldu = true
+        val simdi = saat()
         val k = kayitlar[id]
         if (k == null) {
-            kayitlar[id] = Kayit(okunan, sinif.orEmpty(), listede)
+            kayitlar[id] = Kayit(okunan, sinif.orEmpty(), listede, simdi)
         } else {
             k.okunan = okunan // the same window may change its words (door → boot)
             if (sinif != null) k.sinif = sinif
             if (listede) k.listede = true
+            if (olay) k.sonOlay = simdi
         }
     }
 
@@ -121,7 +149,7 @@ class KapiYorumlayici {
      */
     fun durumOlayi(paket: CharSequence?, sinif: CharSequence?, metinler: List<CharSequence?>, pencereId: Int): Boolean {
         if (paket?.toString() != KapiMetni.PAKET) return false
-        kaydet(pencereId, KapiMetni.sinifla(metinler), sinif?.toString(), listede = false)
+        kaydet(pencereId, KapiMetni.sinifla(metinler), sinif?.toString(), listede = pencereId in sonListe, olay = true)
         return true
     }
 
@@ -135,14 +163,22 @@ class KapiYorumlayici {
             if (p.paket != KapiMetni.PAKET) continue
             gorulen += p.id
             kayitlar[p.id]?.listede = true
-            kaydet(p.id, KapiMetni.sinifla(p.metinler), p.sinif, listede = true)
+            kaydet(p.id, KapiMetni.sinifla(p.metinler), p.sinif, listede = true, olay = false)
         }
+        sonListe = gorulen + sonListe.filter { it in okunamayan }
+        val simdi = saat()
         val it = kayitlar.entries.iterator()
         while (it.hasNext()) {
             val (id, k) = it.next()
             if (id in gorulen || id in okunamayan) continue
-            if (k.listede) it.remove()
-            else if (listeDisiSayilan.add(id)) Teshis.listeDisiPencere++
+            when {
+                k.listede -> it.remove() // was on screen, is gone: closed
+                simdi - k.sonOlay >= ZAMAN_ASIMI_MS -> {
+                    it.remove()
+                    Teshis.kapiZamanAsimi++
+                }
+                listeDisiSayilan.add(id) -> Teshis.listeDisiPencere++
+            }
         }
     }
 
@@ -150,6 +186,7 @@ class KapiYorumlayici {
     fun sifirla() {
         kayitlar.clear()
         listeDisiSayilan.clear()
+        sonListe = emptySet()
         kapiGoruldu = false
         bagajGoruldu = false
     }
@@ -159,4 +196,9 @@ class KapiYorumlayici {
         val ne = listOfNotNull("kapı".takeIf { k.okunan.kapi }, "bagaj".takeIf { k.okunan.bagaj }).joinToString("+")
         "$id:$ne:${k.sinif}:${if (k.listede) "listede" else "olaydan"}"
     }.ifEmpty { "açık pencere yok" }
+
+    companion object {
+        /** Unconfirmed (never listed) records go this long after their last event. */
+        const val ZAMAN_ASIMI_MS = 10_000L
+    }
 }

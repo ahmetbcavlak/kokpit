@@ -46,52 +46,77 @@ class VeriBaglayiciTest {
     }
 
     @Test
-    fun izinIstegi_baslaDurAliciKaydi() {
+    fun izinIstegi_aliciUygulamaOmrunce_gpsBaslaDur() {
         shadowOf(lm).setProviderEnabled(LocationManager.GPS_PROVIDER, true)
         val a = Robolectric.buildActivity(Activity::class.java).setup().get()
         val b = VeriBaglayici()
         b.hazirla(a)
 
-        // No permission yet: asked once, nothing crashes.
+        // No permission yet: asked (FINE with COARSE), nothing crashes. The receiver is already on.
         val istek = shadowOf(a).lastRequestedPermission
-        assertEquals(listOf(Manifest.permission.ACCESS_FINE_LOCATION), istek.requestedPermissions.toList())
+        assertEquals(
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+            istek.requestedPermissions.toList(),
+        )
         assertEquals(VeriBaglayici.IZIN_ISTEGI, istek.requestCode)
+        assertEquals(1, klimaAlicilari())
 
         b.basla()
-        assertEquals(1, klimaAlicilari())
         assertFalse(b.hizKaynagi!!.dinliyorMu)
         assertEquals("izin yok", Teshis.gps)
         b.basla() // twice: still one receiver
         assertEquals(1, klimaAlicilari())
 
-        // Climate broadcast reaches the contract while started.
         uyg.sendBroadcast(Intent(KlimaCozucu.EYLEM_KLIMA).putExtra(KlimaCozucu.SOL_SICAKLIK, 20))
         bosalt()
         assertEquals(Sicaklik.Derece(20.0), AracVerisi.durum.klima?.sicaklik)
 
-        // Dialog answered "allow" → onPause/onResume → dur/basla picks it up.
+        // Paused (another app in front): the climate receiver stays, so the value is current on return.
         b.dur()
-        assertEquals(0, klimaAlicilari())
+        assertEquals(1, klimaAlicilari())
+        uyg.sendBroadcast(Intent(KlimaCozucu.EYLEM_KLIMA).putExtra(KlimaCozucu.SOL_SICAKLIK, 22))
+        bosalt()
+        assertEquals(Sicaklik.Derece(22.0), AracVerisi.durum.klima?.sicaklik)
+
+        // Dialog answered "allow" → onResume → basla picks it up.
         shadowOf(uyg).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         b.basla()
         assertTrue(b.hizKaynagi!!.dinliyorMu)
         assertEquals(1, shadowOf(lm).getLocationRequests(LocationManager.GPS_PROVIDER).size)
-
         b.dur()
-        assertEquals(0, klimaAlicilari())
         assertEquals(0, shadowOf(lm).getLocationRequests(LocationManager.GPS_PROVIDER).size)
 
-        // Stopped: broadcasts no longer arrive.
+        // Destroyed: receiver gone, broadcasts no longer arrive.
+        b.birak()
+        assertEquals(0, klimaAlicilari())
         uyg.sendBroadcast(Intent(KlimaCozucu.EYLEM_KLIMA).putExtra(KlimaCozucu.SOL_SICAKLIK, 25))
         bosalt()
-        assertEquals(Sicaklik.Derece(20.0), AracVerisi.durum.klima?.sicaklik)
-
-        b.birak()
+        assertEquals(Sicaklik.Derece(22.0), AracVerisi.durum.klima?.sicaklik)
         assertNull(b.hizKaynagi)
     }
 
     @Test
-    fun yapiskanYayinIlkDeger() {
+    fun izinRedSonrasiYenidenSorulmaz() {
+        val a1 = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val b1 = VeriBaglayici()
+        b1.hazirla(a1)
+        assertTrue(shadowOf(a1).lastRequestedPermission != null)
+        b1.birak()
+
+        // Denied; the Activity is created again (cold start, ignition): no second dialog, only the hint.
+        shadowOf(uyg).denyPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+        val a2 = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val b2 = VeriBaglayici()
+        b2.hazirla(a2)
+        assertNull(shadowOf(a2).lastRequestedPermission)
+        assertEquals(false, Teshis.konumIzni)
+        b2.basla()
+        assertNull(AracVerisi.durum.hiz)
+        b2.birak()
+    }
+
+    @Test
+    fun yapiskanYayinIlkDeger_birKezSayilir() {
         shadowOf(uyg).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         @Suppress("DEPRECATION")
         uyg.sendStickyBroadcast(Intent(KlimaCozucu.EYLEM_KLIMA).putExtra(KlimaCozucu.SOL_SICAKLIK, "LO").putExtra(KlimaCozucu.FAN, 2))
@@ -99,11 +124,11 @@ class VeriBaglayiciTest {
         val b = VeriBaglayici()
         b.hazirla(a)
         assertNull(shadowOf(a).lastRequestedPermission) // already granted: not asked
-        b.basla()
         bosalt()
         assertTrue(Teshis.yapiskanGeldi)
         assertEquals(Sicaklik.Low, AracVerisi.durum.klima?.sicaklik)
         assertEquals(2, AracVerisi.durum.klima?.fan)
+        assertEquals(1, Teshis.klimaYayinSayisi)
         b.birak()
     }
 

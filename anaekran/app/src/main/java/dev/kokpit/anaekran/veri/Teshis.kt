@@ -41,6 +41,8 @@ object Teshis {
     @Volatile var kapiServisiBagli: Boolean = false
     /** com.hcn.autocan door windows that were seen in an event but never in getWindows() (research decision 7). */
     @Volatile var listeDisiPencere: Int = 0
+    /** Never-listed door records dropped by the 10 s time-out (KapiYorumlayici.ZAMAN_ASIMI_MS). */
+    @Volatile var kapiZamanAsimi: Int = 0
     private val kapiOlaylari = ArrayDeque<String>()
 
     @Volatile var sonHata: String? = null; private set
@@ -90,7 +92,7 @@ object Teshis {
             "Dış sıcaklık ham: ${disSicaklikHam ?: "—"} · ${once(disSicaklikHamZamani)}",
             "GPS: $gps · izin ${when (konumIzni) { true -> "var"; false -> "yok"; null -> "?" }} · " +
                 "$konumSayisi konum ($hizsizKonumSayisi hızsız) · son ${once(sonKonumZamani)}",
-            "Kapı servisi: ${if (kapiServisiBagli) "bağlı" else "bağlı değil"} · liste dışı pencere $listeDisiPencere",
+            "Kapı servisi: ${if (kapiServisiBagli) "bağlı" else "bağlı değil"} · liste dışı pencere $listeDisiPencere · zaman aşımı $kapiZamanAsimi",
         ) + kapiOlaylari().takeLast(5).map { "  $it" } + listOfNotNull(sonHata?.let { "Hata: $it" })
     }
 
@@ -100,7 +102,7 @@ object Teshis {
         disSicaklikHam = null; disSicaklikHamZamani = 0L
         yayinAlicisi = "kayıtlı değil"; yapiskanGeldi = false
         konumIzni = null; gps = "başlamadı"; konumSayisi = 0; hizsizKonumSayisi = 0; sonKonumZamani = 0L
-        kapiServisiBagli = false; listeDisiPencere = 0
+        kapiServisiBagli = false; listeDisiPencere = 0; kapiZamanAsimi = 0
         synchronized(kapiOlaylari) { kapiOlaylari.clear() }
         sonHata = null
     }

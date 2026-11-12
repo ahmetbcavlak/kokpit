@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- GPS speed (veri/HizKaynagi); asked at run time. No background location. -->
-    <!-- Lint CoarseFineLocation is about Android 12+, where a user may grant only COARSE; the
-         unit runs Android 8.1 (one location group, FINE asked and granted as one). -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:ignore="CoarseFineLocation" />
+    <!-- GPS speed (veri/HizKaynagi); asked at run time, once. No background location.
+         COARSE is declared and asked together with FINE (lint CoarseFineLocation); on API 27 both are
+         the same LOCATION group, so the user sees one dialog. GPS_PROVIDER itself needs FINE. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <!-- Package visibility (only enforced on API 30+; harmless on the 8.1 head unit).
