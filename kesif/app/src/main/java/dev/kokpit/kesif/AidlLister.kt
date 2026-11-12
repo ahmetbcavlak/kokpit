@@ -35,15 +35,21 @@ object AidlLister {
         // The interfaces to detail: the one the service reported, plus anything named like AirCtrl.
         val targets = (listOfNotNull(descriptor) + stubs.map { it.removeSuffix("\$Stub") }.filter { focus.containsMatchIn(it) })
             .distinct()
+        AirCommand.reset(descriptor)
         if (targets.isEmpty()) return out + Line("IAirCtrlServices", "APK'da bulunamadı")
+        val found = ArrayList<AirCommand.Candidate>()
 
         val loader = PathClassLoader(apk, ClassLoader.getSystemClassLoader())
         for (name in targets) try {
             val iface = runCatching { Class.forName(name, false, loader) }.getOrElse {
                 out += Line(name, "yüklenemedi: ${it.javaClass.simpleName}"); null
             } ?: continue
+            var stubDescriptor: String? = null
             val codes = runCatching {
                 val stub = Class.forName("$name\$Stub", false, loader)
+                stubDescriptor = runCatching {
+                    stub.getDeclaredField("DESCRIPTOR").apply { isAccessible = true }.get(null) as? String
+                }.getOrNull()
                 stub.declaredFields.filter { Modifier.isStatic(it.modifiers) && it.name.startsWith("TRANSACTION_") && it.type == Int::class.javaPrimitiveType }
                     .associate { f -> f.isAccessible = true; f.name.removePrefix("TRANSACTION_") to f.getInt(null) }
             }.getOrElse { emptyMap() }
@@ -51,11 +57,17 @@ object AidlLister {
             iface.declaredMethods.sortedBy { codes[it.name] ?: Int.MAX_VALUE }.forEach { m ->
                 val sig = "${m.returnType.simpleName} ${m.name}(${m.parameterTypes.joinToString(", ") { it.simpleName }})"
                 out += Line("   " + (codes[m.name]?.let { "#$it" } ?: "#?"), sig)
+                // A climate "temperature up" with no parameters: the only kind the 0.7.1 button may call.
+                val code = codes[m.name]
+                if (code != null && m.parameterTypes.isEmpty() && AirCommand.looksLikeTempUp(m.name))
+                    found += AirCommand.Candidate(stubDescriptor ?: name, name, m.name, sig, code)
             }
         } catch (t: Throwable) {
             // One interface that cannot be read (e.g. a missing parameter type) does not hide the rest.
             out += Line(name, "okunamadı: ${t.javaClass.simpleName} ${t.message.orEmpty()}")
         }
+        AirCommand.choose(found)
+        out += Line("Klima +0,5° adayı", AirCommand.candidateText())
         return out
     }
 }

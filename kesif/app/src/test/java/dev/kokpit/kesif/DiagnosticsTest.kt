@@ -117,4 +117,82 @@ class DiagnosticsTest {
         assertFalse(UiDump.doorish("kapalı", name = false))
         assertFalse(UiDump.doorish("Klima kapatıldı", name = false))
     }
+
+    @Test
+    fun climateCandidateIsStrict() {
+        assertTrue(AirCommand.looksLikeTempUp("tempUp"))
+        assertTrue(AirCommand.looksLikeTempUp("setLeftTempAdd"))
+        assertTrue(AirCommand.looksLikeTempUp("addTemp"))
+        assertFalse(AirCommand.looksLikeTempUp("tempDown"))
+        assertFalse(AirCommand.looksLikeTempUp("windLevelUp"))
+        assertFalse(AirCommand.looksLikeTempUp("getTemp"))
+        assertFalse(AirCommand.looksLikeTempUp("onTempUpdate"))
+        for (bad in listOf("setTempUnitInC", "isTempUnitSupported", "tempFanUp", "setTempModeUp", "setTemperaturePowerUp",
+                "setTempAutoWindUp", "powerUpTemp", "tempUpDown", "getTempSinceBoot", "tempPopup", "tempBackup",
+                "tempUpgrade", "rightTempUp", "passengerTempUp", "TEMP_UP_ALL", "tempDec", "tempUpR", "tempUpRR", "rearTempUp",
+                "backTempUp", "coTempUp", "fuTempUp", "seatHeatTempUp", "steerWheelTempUp", "addTempOffset", "setTempUpLimit"))
+            assertFalse(bad, AirCommand.looksLikeTempUp(bad))
+        for (good in listOf("tempUp", "setLeftTempUp", "DriverTempUp", "addTemp", "TEMP_UP", "temperatureIncrease"))
+            assertTrue(good, AirCommand.looksLikeTempUp(good))
+        fun c(m: String) = AirCommand.Candidate("x.IAirCtrlServices", "x.IAirCtrlServices", m, "void $m()", 1)
+        AirCommand.reset("x.IAirCtrlServices")
+        AirCommand.choose(listOf(c("tempUp")))
+        assertEquals("tempUp", AirCommand.candidate?.method)
+        assertTrue(AirCommand.ready)
+        AirCommand.choose(listOf(c("tempUp"), c("tempAdd")))
+        assertEquals(null, AirCommand.candidate) // two, neither says left/driver: ambiguous
+        AirCommand.choose(listOf(c("leftTempUp"), c("tempAdd")))
+        assertEquals("leftTempUp", AirCommand.candidate?.method)
+        // The service reports another interface: never ready.
+        AirCommand.reset("x.ICanService")
+        AirCommand.choose(listOf(c("tempUp")))
+        assertFalse(AirCommand.ready)
+    }
+
+    private class FakeAir(private val desc: String) : android.os.Binder() {
+        val calls = java.util.concurrent.atomic.AtomicInteger(0)
+        override fun getInterfaceDescriptor(): String = desc
+        override fun onTransact(code: Int, data: android.os.Parcel, reply: android.os.Parcel?, flags: Int): Boolean {
+            if (code == INTERFACE_TRANSACTION) return super.onTransact(code, data, reply, flags)
+            data.enforceInterface(desc)
+            calls.incrementAndGet()
+            reply?.writeNoException()
+            return true
+        }
+    }
+
+    private fun sendWith(fakeDesc: String, candDesc: String): Pair<Int, String> {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val fake = FakeAir(fakeDesc)
+        val intent = android.content.Intent(ServiceProbe.ACTION).setPackage(ServiceProbe.PKG)
+        shadowOf(app).setComponentNameAndServiceForBindServiceForIntent(intent,
+            android.content.ComponentName(ServiceProbe.PKG, "com.hcn.autocan.CanService"), fake)
+        val c = AirCommand.Candidate(candDesc, candDesc, "tempUp", "void tempUp()", 7)
+        AirCommand.reset(null); AirCommand.choose(listOf(c))
+        var done = false
+        assertTrue(AirCommand.send(app, c) { done = true })
+        assertFalse(AirCommand.send(app, c) { }) // a second confirmation while busy is refused
+        val until = System.currentTimeMillis() + 10_000
+        while (!done && System.currentTimeMillis() < until) {
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100)); Thread.sleep(20)
+        }
+        assertTrue(done)
+        return fake.calls.get() to AirCommand.lastResult.orEmpty()
+    }
+
+    @Test
+    fun climateSendsExactlyOnce() {
+        val (calls, result) = sendWith("x.IAirCtrlServices", "x.IAirCtrlServices")
+        println(result)
+        assertEquals(1, calls)
+        assertTrue(result.startsWith("gönderildi"))
+    }
+
+    @Test
+    fun climateSendsNothingToAnotherInterface() {
+        val (calls, result) = sendWith("x.ICanService", "x.IAirCtrlServices")
+        println(result)
+        assertEquals(0, calls)
+        assertTrue(result.contains("komut gönderilmedi"))
+    }
 }

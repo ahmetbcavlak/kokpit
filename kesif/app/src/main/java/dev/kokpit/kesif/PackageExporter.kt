@@ -434,7 +434,8 @@ object PackageExporter {
     fun writeDiagnosticZip(out: OutputStream) {
         ZipOutputStream(out).use { zip ->
             // The window event log lives one folder up; it belongs in the diagnostic bundle too.
-            listOfNotNull(app?.let { WindowLog.file(it) }, app?.let { UiDump.file(it) }, app?.let { ServiceProbe.interfaceFile(it) })
+            listOfNotNull(app?.let { WindowLog.file(it) }, app?.let { UiDump.file(it) }, app?.let { ServiceProbe.interfaceFile(it) },
+                app?.let { AirCommand.file(it) })
                 .filter { it.exists() }.forEach { f ->
                 runCatching { FileInputStream(f).use { input ->
                     zip.putNextEntry(ZipEntry(f.name).apply { time = f.lastModified() }); input.copyTo(zip, 64 * 1024); zip.closeEntry()

@@ -31,7 +31,7 @@ td.v{color:#ECEEEA;font-weight:600;white-space:nowrap}
 <small>Gri: veri yok · Kehribar: değer var ama bu oturumda değişmedi, eski olabilir · Yeşil: değişti (sen bir şey yapınca değişiyorsa veri canlı)</small></div>
 <div class="rec" id="rec">…</div></div>
 <a class="btn" href="/kayit.csv">Kaydı indir (CSV)</a><a class="btn s" href="/kayit.json">JSON</a>
-<a class="btn s" href="/rapor">Ekran raporu</a><a class="btn s" href="/paketler">Paketler</a><a class="btn s" href="/pencereler.csv">Pencere olayları</a><a class="btn s" href="/arayuz.csv">Arayüz dökümü</a><a class="btn s" href="/servis-arayuzu.txt">Servis arayüzü</a>
+<a class="btn s" href="/rapor">Ekran raporu</a><a class="btn s" href="/paketler">Paketler</a><a class="btn s" href="/pencereler.csv">Pencere olayları</a><a class="btn s" href="/arayuz.csv">Arayüz dökümü</a><a class="btn s" href="/servis-arayuzu.txt">Servis arayüzü</a><a class="btn s" href="/klima-komutu.csv">Klima denemesi</a>
 <div class="grid" id="g"></div>
 <h3>Son değişiklikler</h3><table class="ev" id="ev"></table>
 <h3>Kayıt dosyaları</h3><div id="files" class="m"></div>

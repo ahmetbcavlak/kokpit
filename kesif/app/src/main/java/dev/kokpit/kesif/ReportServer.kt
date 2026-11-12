@@ -70,9 +70,13 @@ class ReportServer(
                 else sendGrowing(out, f, "text/csv; charset=utf-8")
             }
             route == "/rapor" -> send(out, "text/html; charset=utf-8", html(report()))
-            route == "/arayuz.csv" || route == "/servis-arayuzu.txt" -> {
+            route == "/arayuz.csv" || route == "/servis-arayuzu.txt" || route == "/klima-komutu.csv" -> {
                 val ctx = PackageExporter.appContext()
-                val f = ctx?.let { if (route == "/arayuz.csv") UiDump.file(it) else ServiceProbe.interfaceFile(it) }
+                val f = ctx?.let { when (route) {
+                    "/arayuz.csv" -> UiDump.file(it)
+                    "/klima-komutu.csv" -> AirCommand.file(it)
+                    else -> ServiceProbe.interfaceFile(it)
+                } }
                 if (f == null || !f.exists()) send(out, "text/plain; charset=utf-8", "Henüz yok", 404)
                 else sendGrowing(out, f, if (route.endsWith(".csv")) "text/csv; charset=utf-8" else "text/plain; charset=utf-8")
             }

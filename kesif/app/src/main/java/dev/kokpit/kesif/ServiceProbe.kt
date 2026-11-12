@@ -184,6 +184,7 @@ object ServiceProbe {
     fun section(ctx: Context): Section = Section(
         "Servis erişilebilirliği · $ACTION",
         staticInfo(ctx) + (lastResult ?: listOf(Line("Bağlanma testi", "henüz denenmedi (canlı ekrandaki düğmeyle yapılır)"))) +
-            (interfaceLines ?: listOf(Line("Arayüz listesi", "henüz alınmadı (canlı ekrandaki düğmeyle)"))),
+            (interfaceLines ?: listOf(Line("Arayüz listesi", "henüz alınmadı (canlı ekrandaki düğmeyle)"))) +
+            listOfNotNull(AirCommand.lastResult?.let { Line("Klima +0,5° denemesi", it) }),
     )
 }
