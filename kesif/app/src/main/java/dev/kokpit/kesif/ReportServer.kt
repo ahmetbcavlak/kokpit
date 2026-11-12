@@ -45,8 +45,10 @@ class ReportServer(
         c.soTimeout = 10_000
         val reader = BufferedReader(InputStreamReader(c.getInputStream()))
         val requestLine = reader.readLine() ?: return@use
-        val path = URLDecoder.decode(requestLine.split(" ").getOrNull(1) ?: "/", "UTF-8")
         val out = c.getOutputStream()
+        val path = runCatching { URLDecoder.decode(requestLine.split(" ").getOrNull(1) ?: "/", "UTF-8") }.getOrElse {
+            send(out, "text/plain; charset=utf-8", "Geçersiz adres", 400); return@use
+        }
         val route = path.substringBefore('?')
         when {
             route == "/" || route == "/canli" -> send(out, "text/html; charset=utf-8", LivePage.html())
@@ -69,11 +71,27 @@ class ReportServer(
             }
             route == "/rapor" -> send(out, "text/html; charset=utf-8", html(report()))
             route == "/paketler" || route == "/paketler/" -> send(out, "text/html; charset=utf-8", packagesPage())
+            route == "/paketler/teshis.zip" && PackageExporter.running ->
+                send(out, "text/plain; charset=utf-8", "Dışa aktarma sürüyor; bitince yeniden dene.", 409)
+            route == "/paketler/teshis.zip" -> {
+                // Small diagnostic files in one zip, streamed: the length is not known up front,
+                // so the body simply ends when the connection closes.
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n" +
+                    "Content-Disposition: attachment; filename=\"kesif-teshis.zip\"\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+                    .toByteArray(Charsets.US_ASCII))
+                PackageExporter.writeDiagnosticZip(out)
+                out.flush()
+            }
             route.startsWith("/paketler/") -> {
                 // Only a finished file from the export folder's own list, never a path from the request.
                 val f = PackageExporter.byName(route.removePrefix("/paketler/"))
                 if (f == null) send(out, "text/plain; charset=utf-8", "Bulunamadı", 404)
-                else sendFile(out, f, f.name, if (f.name.endsWith(".csv")) "text/csv; charset=utf-8" else "application/vnd.android.package-archive")
+                else sendFile(out, f, f.name, when {
+                    f.name.endsWith(".csv") -> "text/csv; charset=utf-8"
+                    f.name.endsWith(".txt") -> "text/plain; charset=utf-8"
+                    f.name.endsWith(".apk") -> "application/vnd.android.package-archive"
+                    else -> "application/octet-stream"
+                })
             }
             path.startsWith("/rapor.txt") -> send(out, "text/plain; charset=utf-8", report().toText())
             path == "/apk" || path == "/apk/" -> send(out, "text/html; charset=utf-8", apkPage())
@@ -90,7 +108,9 @@ class ReportServer(
 
     private fun send(out: OutputStream, type: String, body: String, code: Int = 200) {
         val bytes = body.toByteArray(Charsets.UTF_8)
-        val status = if (code == 200) "200 OK" else "$code Not Found"
+        val status = when (code) {
+            200 -> "200 OK"; 400 -> "400 Bad Request"; 409 -> "409 Conflict"; else -> "$code Not Found"
+        }
         out.write(
             ("HTTP/1.1 $status\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\n" +
                 "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray(Charsets.US_ASCII)
@@ -175,13 +195,15 @@ li{margin:10px 0}
 
     private fun packagesPage(): String {
         val files = PackageExporter.files()
-        val items = files.joinToString("\n") {
-            "<li><a href=\"/paketler/${esc(it.name)}\" download>${esc(it.name)}</a><br><small>${PackageExporter.mb(it.length())}</small></li>"
+        val items = files.joinToString("\n") { (rel, f) ->
+            val href = rel.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+            "<li><a href=\"/paketler/$href\" download>${esc(rel)}</a><br><small>${PackageExporter.mb(f.length())}</small></li>"
         }
         return """
 <!DOCTYPE html><html lang="tr"><head>$style<title>Dışa aktarılan paketler</title></head><body>
 <h1>Dışa aktarılan paketler</h1>
-<small>${esc(PackageExporter.statusText())}. paketler.csv hangi dosyanın nereden geldiğini, sürümünü ve SHA-256 değerini gösterir.</small>
+<small>${esc(PackageExporter.statusText())}. paketler.csv hangi dosyanın nereden geldiğini, sürümünü, SHA-256 değerini ve okunamayan dosyaları gösterir.</small>
+<a class="btn" href="/paketler/teshis.zip">APK’lar hariç hepsi tek dosyada (zip)</a>
 <ul>${items.ifEmpty { "<li>Henüz dosya yok. Ekranda “Paketleri dışa aktar”a dokun.</li>" }}</ul>
 <a class="btn" href="/canli">Canlı veri</a>
 </body></html>

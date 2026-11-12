@@ -169,7 +169,7 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
             setPadding(dp(14), dp(12), dp(14), dp(12))
             background = GradientDrawable().apply { setColor(Palette.surface); cornerRadius = dp(16).toFloat() }
             addView(label("Paketleri dışa aktar", 17f, Palette.accent, bold = true))
-            addView(label("com.hcn.* ve Ayarlar uygulamasının APK dosyalarını (bölünmüş parçalar dahil) kayıt klasörüne kopyalar; iPad’den /paketler adresinden indirilir. Sistem dosyalarını yalnız okur; kopyalar bu uygulamanın klasörüne yazılır ve aşağıdaki boyut kadar yer kaplar.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
+            addView(label("com.hcn.* ve Ayarlar APK’ları (bölünmüş parçalar dahil), AutoSetting ve MtkSettings oat klasörleri, /data/config (5 MB üstü ve .apk hariç) ve getprop çıktısı kayıt klasörüne kopyalanır; okunamayanlar paketler.csv’ye yazılır. iPad’den /paketler adresinden indirilir. Sistem dosyalarını yalnız okur; kopyalar bu uygulamanın klasörüne yazılır ve en az aşağıdaki boyut kadar yer kaplar.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
             addView(pkgInfo)
             addView(pkgStatus.apply { setPadding(0, dp(4), 0, dp(8)) })
             addView(pkgButton, LinearLayout.LayoutParams(MATCH_PARENT, dp(60)))

@@ -6,7 +6,7 @@ Renault Mégane IV'teki dikey araç ekranı için kendi arayüzümüz.
 
 **[▶ Kokpit Keşif'i indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-kesif.apk)**
 
-Sürüm: 0.5.0 · 110 KB · 0.4.0'ın üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
+Sürüm: 0.5.1 · 117 KB · 0.4 ve 0.5'in üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
 
 0.4.0'dan beri yeni bir imza anahtarı kullanılıyor; 0.2.0'ın üzerine kurulmaz. Ekranda 0.2.0 varsa bir kez:
 
@@ -19,6 +19,16 @@ Sürüm: 0.5.0 · 110 KB · 0.4.0'ın üzerine kurulur; 0.2.0 yüklüyse **önce
 ## Kokpit Keşif nedir?
 
 Ekranı ve araçtan gelen veriyi tanımak için küçük bir uygulama. **Yalnızca okur, hiçbir ayarı değiştirmez, araca hiçbir şey göndermez.**
+
+### 0.5.1 · Ek teşhis ve yedekleme
+
+"Paketleri dışa aktar" artık şunları da kopyalar (salt okunur; okunamayan dosya `paketler.csv`'ye "okunamadı" olarak yazılır, işlem durmaz):
+
+- `/system/app/AutoSetting/oat/` ve `/system/priv-app/MtkSettings/oat/` altındaki okunabilen her dosya, klasör yapısıyla `sistem/` altına
+- `/data/config/` altındaki okunabilen dosyalar; 5 MB'tan büyükler ve `.apk`'lar atlanır
+- `getprop` çıktısı olduğu gibi `getprop.txt` olarak (seri numarası gibi kimlik bilgileri de içerir)
+- Yalnız düzenli dosyalar kopyalanır; FIFO, aygıt dosyası ve taranan klasörün dışını gösteren bağlantılar atlanır
+- iPad'de `/paketler/teshis.zip`: APK'lar hariç hepsi tek dosyada
 
 ### 0.5.0 · Paketleri dışa aktar
 
