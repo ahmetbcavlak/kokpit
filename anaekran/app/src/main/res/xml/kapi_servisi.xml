@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Kokpit kapı uyarısı (KapiServisi): only reads, never acts.
+  - No packageNames on purpose: TYPE_WINDOWS_CHANGED has no package name and would be dropped
+    (research decision 6). The service keeps com.hcn.autocan only, in code.
+  - canRetrieveWindowContent + flagRetrieveInteractiveWindows: needed for TYPE_WINDOWS_CHANGED and getWindows().
+  - flagIncludeNotImportantViews: the popup's text views may be marked "not important for accessibility";
+    this only widens what can be read.
+  - notificationTimeout 0 (as Keşif 0.6, which caught the door popup on the car this way): with a delay
+    the system keeps only the last pending event of a type, so another app's window event could replace
+    the door popup's.
+  - No canPerformGestures, no touch exploration, no key filtering.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/kapi_servisi_aciklama"
+    android:notificationTimeout="0" />

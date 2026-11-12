@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- GPS speed (veri/HizKaynagi); asked at run time. No background location. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
     <!-- Package visibility (only enforced on API 30+; harmless on the 8.1 head unit).
          No QUERY_ALL_PACKAGES: the app list only needs launcher activities. -->
     <queries>
@@ -29,5 +33,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Door/boot warning (veri/KapiServisi). Off until the user turns it on in Settings > Accessibility.
+             Exported so the system can bind it; only the system may (BIND_ACCESSIBILITY_SERVICE). -->
+        <service
+            android:name=".veri.KapiServisi"
+            android:exported="true"
+            android:label="@string/kapi_servisi_adi"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kapi_servisi" />
+        </service>
     </application>
 </manifest>

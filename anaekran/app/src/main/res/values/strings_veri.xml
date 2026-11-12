@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Accessibility service, shown in Settings > Accessibility -->
+    <string name="kapi_servisi_adi">Kokpit kapı uyarısı</string>
+    <string name="kapi_servisi_aciklama">Kokpit\'in kapı ve bagaj uyarısı için. Yalnız com.hcn.autocan uygulamasının açtığı kapı/bagaj penceresindeki yazıyı (ör. “Kapı açık”) okur. Android ona tüm uygulamaların pencere olaylarını iletir; diğer uygulamaların pencerelerinde yalnız hangi uygulamaya ait olduklarına bakar, içlerini okumaz. Hiçbir şeyi kaydetmez, hiçbir yere göndermez. Hiçbir şeye dokunmaz, tıklamaz, yazı yazmaz, pencere kapatmaz.</string>
+
+    <!-- Calm hints for the screens (task 4) -->
+    <string name="kapi_servisi_ipucu">Kapı uyarısı için: Ayarlar › Erişilebilirlik › Kokpit kapı uyarısı’nı aç.</string>
+    <string name="konum_izni_ipucu">Hız için konum izni gerekli: Ayarlar › Uygulamalar › Kokpit › İzinler › Konum.</string>
+</resources>
