@@ -45,8 +45,9 @@ object TestYardim {
         override val gorunum = View(c)
         var klip = 0
         var birakildi = false
-        override fun hazirla(klipHam: Int, d: Oynatici.Dinleyici) { klip = klipHam }
-        override fun birak() { birakildi = true }
+        var dinleyici: Oynatici.Dinleyici? = null
+        override fun hazirla(klipHam: Int, d: Oynatici.Dinleyici) { klip = klipHam; dinleyici = d }
+        override fun birak(): Long { birakildi = true; return 0L }
     }
 
     /** Every fake player created since [esZamanli], oldest first. */

@@ -140,7 +140,11 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         ekranlar.dinle(this)
 
         for (b in baglayicilar) b.kur(this, katmanlar)
-        hareket?.let { ekranlar.gecis = it.gecis }
+        hareket?.let {
+            ekranlar.gecis = it.gecis
+            // Wiring step 6: while the opaque video is on screen the scene layer is not drawn.
+            it.videoGorunurlugu = { video -> sahneGorunur(!video) }
+        }
         acilisiBaslat()
     }
 
@@ -241,13 +245,14 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
 
     /**
      * Wiring step 5: inside `bitti` the scene layer already shows the intro's target (set when the
-     * intro started, decoded long before the fade ends). After a normal end, data that changed
-     * during the clip is applied (park/drive, boot picture, theme) — never after KESILDI.
+     * intro started, decoded long before the fade ends). Then data that changed during the clip
+     * is applied (park/drive, boot picture, theme); starting a new motion call from `bitti` is
+     * safe for every result, KESILDI included.
      */
+    @Suppress("UNUSED_PARAMETER")
     private fun acilisiBitir(s: KlipOynatici.Sonuc?) {
         acilisSuruyor = false
         ekranlar.goster(acilisHedefi)
-        if (s == KlipOynatici.Sonuc.KESILDI) return
         val d = AracVerisi.durum
         if (d.hareketHali != uygulananHal) hareketHaliDegisti(d.hareketHali) else sahneyiGuncelle()
     }
@@ -298,15 +303,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
 
     /**
      * Hides the scene layer while an opaque clip covers it (HWUI would still fill it every
-     * frame) and shows it again before the clip's overlay goes.
-     *
-     * NOT WIRED YET (merge with the motion agent's next commit): today's HareketBaglayici has no
-     * "video visible / video removed" callback, and guessing it from the poster would hide the
-     * scene too early. When the hook lands: call `sahneGorunur(false)` from "video görünür oldu"
-     * and `sahneGorunur(true)` from "video kalktı" — the latter at the latest inside every
-     * `bitti` of acilisiOynat/gecisOynat, before the overlay is dropped.
+     * frame) and shows it again before the clip goes: HareketBaglayici.videoGorunurlugu calls
+     * in pairs, `false` always before `bitti`. INVISIBLE, not GONE: size and bitmap stay.
      */
-    @Suppress("unused")
     private fun sahneGorunur(gorunur: Boolean) {
         val v = if (gorunur) View.VISIBLE else View.INVISIBLE
         if (katmanlar.sahne.visibility != v) katmanlar.sahne.visibility = v
@@ -457,7 +456,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             "Araç: hareket ${d.hareketHali ?: "?"} · hız ${d.hiz ?: "—"} · kapı ${d.kapiAcik ?: "?"} · bagaj ${d.bagajAcik ?: "?"} · dış ${d.disSicaklik ?: "—"}",
             "Klima (çözülen): ${d.klima ?: "—"}",
             "Erişilebilirlik servisi ayarı: ${if (ErisilebilirlikDurumu.etkinMi(this)) "açık" else "kapalı"}",
-            "Klip ilk kare: ${olcum?.let { "${it.klip} ${it.ilkKareMs} ms" } ?: "ölçülmedi"}",
+            "Klip: ${olcum?.let { "${it.klip} · ilk kare ${it.ilkKareMs?.let { ms -> "$ms ms" } ?: "gelmedi"} · bırakma ${it.birakmaMs?.let { ms -> "$ms ms" } ?: "—"}" } ?: "ölçülmedi"}",
+            "Kapı kayıtları: liste dışı pencere ${Teshis.listeDisiPencere} · zaman aşımıyla düşen ${Teshis.kapiZamanAsimi}",
             "Kare hızı sayacı: ${hareket?.sayac?.text ?: "—"}",
             "",
         ) + Teshis.satirlar()

@@ -182,6 +182,40 @@ class EkranTest {
     }
 
     @Test
+    fun zamanAsimiylaDusenKayittaKapandiYok() {
+        SahteVeri.uygula(SahteVeri.parkGece())
+        c = TestYardim.acVeGec()
+        AracVerisi.guncelle { kapiAcik(true) }
+        assertEquals(UyariKatmani.Gorunum.PARK_BASLIGI, a.uyari.gorunum)
+        // The door service drops a never-listed record after 10 s: counter rises with the false.
+        dev.kokpit.anaekran.veri.Teshis.kapiZamanAsimi++
+        AracVerisi.guncelle { kapiAcik(false) }
+        assertEquals(UyariKatmani.Gorunum.YOK, a.uyari.gorunum)
+        assertTrue(metinler(Ekran.PARK).contains("Gece mavisi"))
+        // A real close afterwards confirms again.
+        AracVerisi.guncelle { kapiAcik(true) }
+        AracVerisi.guncelle { kapiAcik(false) }
+        assertEquals(UyariKatmani.Gorunum.KAPANDI_PARK, a.uyari.gorunum)
+    }
+
+    @Test
+    fun klipSirasindaSahneGizli() {
+        c = TestYardim.acVeGec()
+        assertEquals(View.VISIBLE, a.katmanlar.sahne.visibility)
+        hal(HareketHali.SURUS)
+        val o = TestYardim.oynaticilar.last()
+        assertEquals(dev.kokpit.anaekran.R.raw.klip_surus, o.klip)
+        TestYardim.bosalt() // poster decoded, video view added
+        o.dinleyici!!.basladi()
+        o.dinleyici!!.kareGeldi()
+        assertEquals(View.INVISIBLE, a.katmanlar.sahne.visibility)
+        o.dinleyici!!.bitti()
+        TestYardim.gecisleriBitir()
+        assertEquals(View.VISIBLE, a.katmanlar.sahne.visibility)
+        assertFalse(a.hareket!!.oynatici!!.calisiyor)
+    }
+
+    @Test
     fun kapiVeBagajBirlikteVeSurusteKart() {
         SahteVeri.uygula(SahteVeri.parkGece())
         c = TestYardim.acVeGec()
@@ -325,7 +359,8 @@ class EkranTest {
         assertTrue(m, m.contains("Klima ham"))
         assertTrue(m, m.contains("u() ölçeği 1.000"))
         assertTrue(m, m.contains("768×1024"))
-        assertTrue(m, m.contains("Klip ilk kare"))
+        assertTrue(m, m.contains("Klip: "))
+        assertTrue(m, m.contains("zaman aşımıyla düşen"))
         a.teshis.performClick()
         assertFalse(a.teshis.acik)
     }

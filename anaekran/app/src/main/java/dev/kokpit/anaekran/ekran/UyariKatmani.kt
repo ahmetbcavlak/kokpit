@@ -23,6 +23,7 @@ import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.Yazi
 import dev.kokpit.anaekran.veri.AracDurumu
 import dev.kokpit.anaekran.veri.HareketHali
+import dev.kokpit.anaekran.veri.Teshis
 
 /**
  * The warning layer (above the screens, below the bottom bar): door / boot open and the short
@@ -40,18 +41,25 @@ import dev.kokpit.anaekran.veri.HareketHali
  *    park screen the scene dims (Y-13: brightness .55) under a centred serif "Kapı kapandı.";
  *    elsewhere the same card as Y-14 in the calm `ok` tint (the speed must stay readable while
  *    driving). It stays [KAPANDI_MS] and goes by itself; a tap removes it at once.
+ *    Not after the door service's 10 s time-out (Teshis.kapiZamanAsimi rose with the false):
+ *    then the popup was only never heard of again, not seen closing.
  *  - During the intro nothing is shown (the warning comes when the park/drive screen is in front).
  *
  * Nothing here is clickable except the confirmation (tap to dismiss): touches fall through.
  */
 @SuppressLint("ViewConstructor")
-class UyariKatmani(context: Context) : MutlakDuzen(context) {
+class UyariKatmani(
+    context: Context,
+    /** Records dropped by the door service's 10 s time-out so far (Teshis.kapiZamanAsimi). */
+    private val zamanAsimiSayaci: () -> Int = { Teshis.kapiZamanAsimi },
+) : MutlakDuzen(context) {
 
     private var palet = Palet.GECE
     private var durum = AracDurumu()
     private var ekran: Ekran? = null
     private var oncekiKapi: Boolean? = null
     private var oncekiBagaj: Boolean? = null
+    private var sonZamanAsimi = zamanAsimiSayaci()
 
     /** What is shown now (tests, MainActivity's light line). */
     enum class Gorunum { YOK, PARK_BASLIGI, KART, KAPANDI_PARK, KAPANDI_KART }
@@ -112,7 +120,13 @@ class UyariKatmani(context: Context) : MutlakDuzen(context) {
 
     /** New data and/or a new screen in front. */
     fun guncelle(d: AracDurumu, e: Ekran?) {
-        val kapandiOldu = (oncekiKapi == true && d.kapiAcik == false) || (oncekiBagaj == true && d.bagajAcik == false)
+        // A record the service dropped by its 10 s time-out (popup never seen in the window list)
+        // also turns true into false, but nobody saw it close: the warning goes without "kapandı".
+        val sayac = zamanAsimiSayaci()
+        val zamanAsimiyla = sayac != sonZamanAsimi
+        sonZamanAsimi = sayac
+        val kapandiOldu = !zamanAsimiyla &&
+            ((oncekiKapi == true && d.kapiAcik == false) || (oncekiBagaj == true && d.bagajAcik == false))
         val kapiKapandi = oncekiKapi == true && d.kapiAcik == false
         val bagajKapandi = oncekiBagaj == true && d.bagajAcik == false
         oncekiKapi = d.kapiAcik
