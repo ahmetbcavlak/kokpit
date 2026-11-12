@@ -30,12 +30,23 @@ interface KareKaynagi {
 }
 
 /**
+ * Told by the motion components when a motion (clip frames, fade, screen transition) starts
+ * and stops. Calls may nest (count them); main thread only.
+ */
+interface HareketIzci {
+    fun hareketBasladi()
+    fun hareketBitti()
+}
+
+/**
  * Frame-rate counter for the 96×20 design-px slot (Geist Mono 11 px, palette `mu`).
  *
- * What the number means: frames the APP DREW per second while something moved (see
- * [KareHiziHesabi]), plus the longest main-thread frame in ms — "60 fps 17 ms". It is not the
- * VSYNC rate: Choreographer calls back at ≈60 Hz even when nothing is drawn, so its own rate
- * would always read 60.
+ * What the number means: frames the APP DREW per second while a known motion ran (clip,
+ * fade, screen transition; see [KareHiziHesabi]) — however badly it stuttered: 8 fps reads 8,
+ * a frozen clip 0 — plus the longest frame in ms — "60 fps 17 ms", "8 fps 125 ms". It is not
+ * the VSYNC rate: Choreographer calls back at ≈60 Hz even when nothing is drawn, so its own
+ * rate would always read 60. The counter's own text change (≤ 2 per second) is one of the
+ * drawn frames; during a frozen clip it can therefore read 1–2 instead of 0.
  *
  * When nothing is drawn (a still screen) the last measurement stays, dimmed: "this is how
  * the last motion ran". A still screen reading "0" would look broken, and reading "60" would
@@ -44,8 +55,8 @@ interface KareKaynagi {
  * motion was measured yet.
  *
  * Cost: an OnDrawListener (one call per drawn frame) and a Choreographer callback per VSYNC
- * only while frames are being drawn; after one still window (500 ms) the callback loop stops
- * and the next drawn frame restarts it. setText only when the shown value changes (≤ 2 per
+ * only while frames are drawn or a motion runs; after one still window (500 ms) without
+ * motion the callback loop stops, and the next drawn frame or motion restarts it. setText only when the shown value changes (≤ 2 per
  * second); in the fixed-size slot a single line keeps its height, so setText invalidates
  * without requestLayout.
  */
@@ -54,7 +65,7 @@ class KareHiziSayaci(
     context: Context,
     private val kaynak: KareKaynagi = KareKaynagi.CHOREOGRAPHER,
     private val saat: () -> Long = System::nanoTime,
-) : TextView(context) {
+) : TextView(context), HareketIzci {
 
     private val hesap = KareHiziHesabi()
     private var calisiyor = false
@@ -63,6 +74,7 @@ class KareHiziSayaci(
     private var son: KareHiziHesabi.Sonuc.Olcum? = null
     private var soluk = false
     private var renk = Palet.GECE.mu
+    private var hareketSayisi = 0
 
     /** Last value shown (tests). */
     val gosterilen: KareHiziHesabi.Sonuc.Olcum? get() = son
@@ -98,8 +110,21 @@ class KareHiziSayaci(
         if (calisiyor) return
         calisiyor = true
         hesap.sifirla()
+        if (hareketSayisi > 0) hesap.hareketBasladi(saat())
         dinleyiciEkle()
         dongu()
+    }
+
+    override fun hareketBasladi() {
+        if (hareketSayisi++ == 0) {
+            hesap.hareketBasladi(saat())
+            dongu()
+        }
+    }
+
+    override fun hareketBitti() {
+        if (hareketSayisi == 0) return
+        if (--hareketSayisi == 0) hesap.hareketBitti(saat())
     }
 
     /** Stop (onPause): no Choreographer callback and no draw listener remain. */
@@ -145,7 +170,7 @@ class KareHiziSayaci(
             KareHiziHesabi.Sonuc.Bos -> {
                 // Still screen: keep the last value dimmed and stop waking up every VSYNC.
                 bosta()
-                hesap.pencereyiKapat()
+                if (hesap.harekette) dongu() else hesap.pencereyiKapat()
             }
         }
     }

@@ -28,6 +28,9 @@ class YumusakGecis(
 
     private var calisan: Calisan? = null
 
+    /** Told when a transition starts/ends (frame-rate counter). */
+    var izci: HareketIzci? = null
+
     /** True while a transition runs (tests, debugging). */
     val suruyor: Boolean get() = calisan != null
 
@@ -36,6 +39,7 @@ class YumusakGecis(
         val e = eski?.takeIf { it !== yeni }
         val c = Calisan(e, yeni, bitti)
         calisan = c
+        izci?.hareketBasladi()
 
         yeni.animate().cancel()
         yeni.alpha = 0f
@@ -60,6 +64,7 @@ class YumusakGecis(
     /** Finishes [c] now: final state, `bitti` once. Safe to call twice. */
     private fun tamamla(c: Calisan) {
         if (calisan === c) calisan = null
+        if (!c.cagrildi) izci?.hareketBitti()
         c.yeni.animate().cancel()
         c.eski?.animate()?.cancel()
         c.eski?.let {
