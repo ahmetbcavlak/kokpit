@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Package visibility (only enforced on API 30+; harmless on the 8.1 head unit).
+         No QUERY_ALL_PACKAGES: the app list only needs launcher activities. -->
+    <queries>
+        <package android:name="com.zjinnova.zlink" />
+        <package android:name="com.hcn.AutoMediaPlayer" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_kokpit"
+        android:label="@string/app_name"
+        android:supportsRtl="false"
+        android:theme="@style/Kokpit">
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|density|uiMode|locale|layoutDirection|fontScale|mcc|mnc"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

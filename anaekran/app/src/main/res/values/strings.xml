@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kokpit</string>
+
+    <!-- Bottom bar -->
+    <string name="klima">klima</string>
+    <string name="disarisi">dışarısı</string>
+    <string name="carplay">CarPlay</string>
+    <string name="muzik">Müzik</string>
+    <string name="harita">Harita</string>
+    <string name="telefon">Telefon</string>
+    <string name="uygulamalar">Uygulamalar</string>
+    <string name="klima_paneli">Klima paneli</string>
+    <string name="kapat">Kapat</string>
+    <string name="geri">Geri</string>
+
+    <!-- Calm notes when another app cannot be opened -->
+    <string name="not_zlink_yok">%1$s açılamadı: ZLink bu cihazda bulunamadı.</string>
+    <string name="not_muzik_yok">Müzik açılamadı: medya oynatıcı bulunamadı.</string>
+    <string name="not_acilamadi">%1$s şu an açılamadı.</string>
+
+    <!-- Placeholder screens (final screens come later) -->
+    <string name="ekran_acilis">Hoş geldin</string>
+    <string name="ekran_park">Park</string>
+    <string name="ekran_surus">Sürüş</string>
+    <string name="ekran_klima">Klima</string>
+    <string name="ekran_uygulamalar">Uygulamalar</string>
+    <string name="yer_tutucu">yer tutucu · son tasarım sonraki sürümde</string>
+    <string name="kapilar">kapılar</string>
+    <string name="bagaj">bagaj</string>
+    <string name="hiz">hız</string>
+    <string name="kapali">Kapalı</string>
+    <string name="acik">Açık</string>
+    <string name="bilinmiyor">—</string>
+    <string name="tek_bolge">Tek bölge</string>
+    <string name="fan">Fan</string>
+    <string name="hava_yonu">Hava yönü</string>
+    <string name="buz_cozme">Ön camı çöz</string>
+    <string name="pasif_not">0.1: yalnız gösterim, düğmeler araca komut göndermez</string>
+    <string name="yukleniyor">Yükleniyor…</string>
+    <string name="uygulama_yok">Yüklü uygulama bulunamadı.</string>
+    <string name="lisanslar">Yazı tipi lisansları</string>
+</resources>

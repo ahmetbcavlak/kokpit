@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon: night tile with an amber horizon line (no logos). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:pathData="M12,2H36A10,10 0 0 1 46,12V36A10,10 0 0 1 36,46H12A10,10 0 0 1 2,36V12A10,10 0 0 1 12,2Z" android:fillColor="#FF05070B" />
+    <path android:pathData="M10,30C16,22 32,22 38,30" android:fillColor="#00000000" android:strokeColor="#FFF2B35E" android:strokeWidth="2.5" android:strokeLineCap="round" />
+    <path android:pathData="M12,35H36" android:fillColor="#00000000" android:strokeColor="#FFA3A9B4" android:strokeWidth="1.5" android:strokeLineCap="round" />
+</vector>
