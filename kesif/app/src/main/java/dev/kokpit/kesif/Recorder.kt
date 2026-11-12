@@ -107,6 +107,8 @@ object Recorder {
         }
         val now = System.currentTimeMillis()
         write(now, "oturum", "", "", "", if (resumed) "kayıt yeniden açıldı (uygulama yeniden başladı)" else "kayıt başladı · Keşif ${BuildConfigCompat.version}")
+        // The unit's build identity (Build.DISPLAY, FINGERPRINT, MCU version properties).
+        DeviceInfo.lines().forEach { write(now, "cihaz", it.label, "", it.value, "") }
         // First rows: what every known key reads right now, so later changes have a starting point.
         LiveProbe.snapshot().forEach { (k, v) -> write(now, "ilk", k, "", v, "") }
         syncNow = true

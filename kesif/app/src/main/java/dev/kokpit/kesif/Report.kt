@@ -260,7 +260,7 @@ object ReportBuilder {
 
         return Report(
             now, summary,
-            listOf(reality, device, screen, cpu, home, settings, net, appSummary) + components(ctx) + props,
+            listOf(reality, device, DeviceInfo.section(), screen, cpu, home, settings, net, appSummary) + components(ctx) + props,
             apps,
         )
     }

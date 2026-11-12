@@ -68,6 +68,13 @@ class ReportServer(
                 else sendGrowing(out, f, "text/csv; charset=utf-8")
             }
             route == "/rapor" -> send(out, "text/html; charset=utf-8", html(report()))
+            route == "/paketler" || route == "/paketler/" -> send(out, "text/html; charset=utf-8", packagesPage())
+            route.startsWith("/paketler/") -> {
+                // Only a finished file from the export folder's own list, never a path from the request.
+                val f = PackageExporter.byName(route.removePrefix("/paketler/"))
+                if (f == null) send(out, "text/plain; charset=utf-8", "Bulunamadı", 404)
+                else sendFile(out, f, f.name, if (f.name.endsWith(".csv")) "text/csv; charset=utf-8" else "application/vnd.android.package-archive")
+            }
             path.startsWith("/rapor.txt") -> send(out, "text/plain; charset=utf-8", report().toText())
             path == "/apk" || path == "/apk/" -> send(out, "text/html; charset=utf-8", apkPage())
             path.startsWith("/apk/") && path.endsWith(".apk") -> {
@@ -116,13 +123,30 @@ class ReportServer(
         out.flush()
     }
 
+    /**
+     * Streams a file. It is opened before the headers go out and its size is taken from the open
+     * file, so a file replaced meanwhile (a re-export) can never make Content-Length wrong.
+     */
     private fun sendFile(out: OutputStream, f: File, name: String, type: String = "application/octet-stream") {
-        out.write(
-            ("HTTP/1.1 200 OK\r\nContent-Type: $type\r\nContent-Length: ${f.length()}\r\n" +
-                "Content-Disposition: attachment; filename=\"$name\"\r\nConnection: close\r\n\r\n")
-                .toByteArray(Charsets.US_ASCII)
-        )
-        f.inputStream().use { it.copyTo(out, 64 * 1024) }
+        val input = runCatching { java.io.FileInputStream(f) }.getOrElse {
+            send(out, "text/plain; charset=utf-8", "Bulunamadı", 404); return
+        }
+        input.use { ins ->
+            val len = ins.channel.size()
+            out.write(
+                ("HTTP/1.1 200 OK\r\nContent-Type: $type\r\nContent-Length: $len\r\n" +
+                    "Content-Disposition: attachment; filename=\"$name\"\r\nConnection: close\r\n\r\n")
+                    .toByteArray(Charsets.US_ASCII)
+            )
+            val buf = ByteArray(64 * 1024)
+            var left = len
+            while (left > 0) {
+                val n = ins.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                if (n < 0) break
+                out.write(buf, 0, n)
+                left -= n
+            }
+        }
         out.flush()
     }
 
@@ -148,6 +172,21 @@ li{margin:10px 0}
 <pre id="r">${esc(r.toText())}</pre>
 </body></html>
 """.trimIndent()
+
+    private fun packagesPage(): String {
+        val files = PackageExporter.files()
+        val items = files.joinToString("\n") {
+            "<li><a href=\"/paketler/${esc(it.name)}\" download>${esc(it.name)}</a><br><small>${PackageExporter.mb(it.length())}</small></li>"
+        }
+        return """
+<!DOCTYPE html><html lang="tr"><head>$style<title>Dışa aktarılan paketler</title></head><body>
+<h1>Dışa aktarılan paketler</h1>
+<small>${esc(PackageExporter.statusText())}. paketler.csv hangi dosyanın nereden geldiğini, sürümünü ve SHA-256 değerini gösterir.</small>
+<ul>${items.ifEmpty { "<li>Henüz dosya yok. Ekranda “Paketleri dışa aktar”a dokun.</li>" }}</ul>
+<a class="btn" href="/canli">Canlı veri</a>
+</body></html>
+""".trimIndent()
+    }
 
     private fun apkPage(): String {
         val items = apks().joinToString("\n") {

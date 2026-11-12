@@ -62,6 +62,8 @@ class MainActivity : Activity() {
         }
         LiveProbe.start(this)
         Recorder.init(this)
+        PackageExporter.init(this)
+        DeviceInfo.warmUp()
         startServer()
         showLive()
     }

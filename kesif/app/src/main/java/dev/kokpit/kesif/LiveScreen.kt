@@ -93,6 +93,9 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
     private val diag = label("", 12f, Palette.faint, mono = true)
     private val addressView = label("", 16f, Palette.text)
     private val qr = ImageView(a)
+    private val pkgInfo = label("Paketler sayılıyor…", 14f, Palette.muted)
+    private val pkgStatus = label("", 14f, Palette.text)
+    private val pkgButton = button("Paketleri dışa aktar", primary = false) { exportPackages() }
     private var qrFor: String? = null
 
     init { build() }
@@ -160,6 +163,26 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
             addView(qr, LinearLayout.LayoutParams(dp(120), dp(120)))
             content.addView(this, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) })
         }
+        // Package export
+        LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = GradientDrawable().apply { setColor(Palette.surface); cornerRadius = dp(16).toFloat() }
+            addView(label("Paketleri dışa aktar", 17f, Palette.accent, bold = true))
+            addView(label("com.hcn.* ve Ayarlar uygulamasının APK dosyalarını (bölünmüş parçalar dahil) kayıt klasörüne kopyalar; iPad’den /paketler adresinden indirilir. Sistem dosyalarını yalnız okur; kopyalar bu uygulamanın klasörüne yazılır ve aşağıdaki boyut kadar yer kaplar.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
+            addView(pkgInfo)
+            addView(pkgStatus.apply { setPadding(0, dp(4), 0, dp(8)) })
+            addView(pkgButton, LinearLayout.LayoutParams(MATCH_PARENT, dp(60)))
+            content.addView(this, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        }
+        // Counting the packages asks PackageManager for every app; done once, off the main thread.
+        kotlin.concurrent.thread(isDaemon = true) {
+            val src = runCatching { PackageExporter.sources(a) }.getOrDefault(emptyList())
+            val text = "${src.map { it.pkg }.distinct().size} paket · ${src.size} dosya · ${PackageExporter.mb(src.sumOf { it.bytes })}" +
+                (src.count { !it.readable }.takeIf { it > 0 }?.let { " · $it dosya okunamıyor" } ?: "")
+            a.runOnUiThread { pkgInfo.text = text }
+        }
+
         content.addView(button("Ekran raporu (0.2’deki kimlik kartı)", primary = false) { onReport() },
             LinearLayout.LayoutParams(MATCH_PARENT, dp(60)).apply { bottomMargin = dp(10) })
         content.addView(diag)
@@ -184,6 +207,11 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
 
     private fun toggleRecording() {
         if (Recorder.recording) Recorder.stop() else Recorder.start()
+        tick()
+    }
+
+    private fun exportPackages() {
+        if (!PackageExporter.start(a)) Toast.makeText(a, "Dışa aktarma zaten sürüyor", Toast.LENGTH_SHORT).show()
         tick()
     }
 
@@ -279,6 +307,11 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
             qrFor = url
             qr.setImageBitmap(url?.let { Qr.bitmap(it, dp(132), Color.BLACK, Color.WHITE) })
         }
+        val ps = PackageExporter.statusText()
+        if (pkgStatus.text.toString() != ps) pkgStatus.text = ps
+        pkgButton.isEnabled = !PackageExporter.running
+        pkgButton.alpha = if (PackageExporter.running) 0.5f else 1f
+
         diag.text = "Okuma: ${LiveProbe.method} · tarama ${LiveProbe.scanCount} · ${LiveProbe.scanKeys} değişken · ${LiveProbe.scanMs} ms" +
             (LiveProbe.lastError?.let { " · hata: $it" } ?: "")
     }
