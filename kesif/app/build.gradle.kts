@@ -11,8 +11,8 @@ android {
         applicationId = "dev.kokpit.kesif"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     signingConfigs {
@@ -37,8 +37,20 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
 dependencies {
     implementation("com.google.zxing:core:3.5.3")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+}
+
+// Previews: Robolectric's downloader is rate-limited in the build sandbox. Put
+// android-all-instrumented-8.1.0-robolectric-4611349-i7.jar (Maven Central) into
+// app/build/robolectric-jars and the test runs offline.
+tasks.withType<Test>().configureEach {
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", layout.buildDirectory.dir("robolectric-jars").get().asFile.absolutePath)
 }

@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.TypedValue
 import android.view.Gravity
@@ -33,7 +34,16 @@ class MainActivity : Activity() {
     private val accent = Color.parseColor("#F0A030")
 
     private lateinit var root: LinearLayout
+    private lateinit var reportView: ScrollView
+    private var live: LiveScreen? = null
+    private var showingLive = true
     private val main = Handler(Looper.getMainLooper())
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (showingLive) live?.tick()
+            main.postDelayed(this, LiveProbe.FAST_MS)
+        }
+    }
     @Volatile private var report: Report? = null
     private var server: ReportServer? = null
     private var port = 8080
@@ -41,20 +51,77 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.decorView.setBackgroundColor(bg)
+        BuildConfigCompat.version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(24), dp(24), dp(48))
         }
-        setContentView(ScrollView(this).apply {
+        reportView = ScrollView(this).apply {
             setBackgroundColor(bg)
             addView(root, MATCH_PARENT, WRAP_CONTENT)
-        })
-        load()
+        }
+        LiveProbe.start(this)
+        Recorder.init(this)
+        startServer()
+        showLive()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        LiveProbe.visible = true
+        main.removeCallbacks(ticker)
+        main.post(ticker)
+    }
+
+    override fun onStop() {
+        // CarPlay or the camera in front: no screen updates; the full scan pauses unless recording.
+        LiveProbe.visible = false
+        main.removeCallbacks(ticker)
+        super.onStop()
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(ticker)
         server?.stop()
+        server = null
+        if (!isChangingConfigurations) {
+            // Closes the file but keeps the recording on, so the next start continues it.
+            Recorder.suspend()
+            LiveProbe.stop(this)
+        }
         super.onDestroy()
+    }
+
+    @Deprecated("Activity.onBackPressed")
+    override fun onBackPressed() {
+        if (!showingLive) showLive() else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    private var addressAt = 0L
+    private var addressCache: String? = null
+
+    /** Listing network interfaces is not free on this CPU; the answer is reused for 5 seconds. */
+    private fun address(): String? {
+        if (server == null) return null
+        val now = SystemClock.elapsedRealtime()
+        if (now - addressAt < 5000 && addressAt != 0L) return addressCache
+        addressAt = now
+        val ip = ReportBuilder.localIps().map { it.second }.firstOrNull { !it.startsWith("127.") }
+        addressCache = ip?.let { "http://$it:$port" }
+        return addressCache
+    }
+
+    private fun showLive() {
+        showingLive = true
+        val screen = live ?: LiveScreen(this, onReport = { showReport() }, address = { address() }).also { live = it }
+        setContentView(screen.root)
+        screen.tick()
+    }
+
+    private fun showReport() {
+        showingLive = false
+        setContentView(reportView)
+        if (report == null) load() else render(report!!)
     }
 
     private fun load() {
@@ -64,7 +131,7 @@ class MainActivity : Activity() {
         thread {
             val r = runCatching { ReportBuilder.build(applicationContext) }.getOrNull()
             report = r
-            main.post { if (r != null) render(r) else showError() }
+            main.post { if (showingLive) return@post; if (r != null) render(r) else showError() }
         }
     }
 
@@ -73,7 +140,7 @@ class MainActivity : Activity() {
         for (p in listOf(8080, 8090, 8765)) {
             val s = ReportServer(
                 p,
-                report = { report ?: ReportBuilder.build(applicationContext) },
+                report = { LiveProbe.attach(report ?: ReportBuilder.build(applicationContext).also { report = it }) },
                 apks = { ReportBuilder.apkFiles(applicationContext) },
             )
             if (runCatching { s.start() }.isSuccess) { server = s; port = p; return }
@@ -83,8 +150,10 @@ class MainActivity : Activity() {
     private fun header() {
         root.addView(label("Kokpit Keşif", 34f, text, bold = true))
         root.addView(label("Ekranın kimlik kartı · yalnızca okur, hiçbir ayarı değiştirmez", 18f, muted).apply {
-            setPadding(0, dp(4), 0, dp(20))
+            setPadding(0, dp(4), 0, dp(12))
         })
+        root.addView(button("← Canlı araç verisi") { showLive() },
+            LinearLayout.LayoutParams(MATCH_PARENT, dp(64)).apply { bottomMargin = dp(16) })
     }
 
     private fun showError() {
@@ -93,8 +162,9 @@ class MainActivity : Activity() {
         root.addView(label("Bilgiler okunamadı. Uygulamayı kapatıp yeniden aç.", 22f, accent))
     }
 
-    private fun render(r: Report) {
+    private fun render(base: Report) {
         startServer()
+        val r = LiveProbe.attach(base)
         root.removeAllViews()
         header()
 

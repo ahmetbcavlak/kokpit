@@ -42,11 +42,32 @@ class ReportServer(
     }
 
     private fun handle(c: Socket): Unit = c.use {
+        c.soTimeout = 10_000
         val reader = BufferedReader(InputStreamReader(c.getInputStream()))
         val requestLine = reader.readLine() ?: return@use
         val path = URLDecoder.decode(requestLine.split(" ").getOrNull(1) ?: "/", "UTF-8")
         val out = c.getOutputStream()
+        val route = path.substringBefore('?')
         when {
+            route == "/" || route == "/canli" -> send(out, "text/html; charset=utf-8", LivePage.html())
+            route == "/canli.json" -> send(out, "application/json; charset=utf-8", LiveProbe.json())
+            route == "/kayit.csv" -> {
+                val f = Recorder.latest()
+                if (f == null) send(out, "text/plain; charset=utf-8", "Henüz kayıt yok", 404)
+                else sendGrowing(out, f, "text/csv; charset=utf-8")
+            }
+            route == "/kayit.json" -> {
+                val f = Recorder.latest()
+                if (f == null) send(out, "application/json; charset=utf-8", "[]", 404)
+                else send(out, "application/json; charset=utf-8", Recorder.asJson(f))
+            }
+            route.startsWith("/kayit/") -> {
+                // Only a name from the recorder's own list is served, never a path from the request.
+                val f = Recorder.byName(route.removePrefix("/kayit/"))
+                if (f == null) send(out, "text/plain; charset=utf-8", "Bulunamadı", 404)
+                else sendGrowing(out, f, "text/csv; charset=utf-8")
+            }
+            route == "/rapor" -> send(out, "text/html; charset=utf-8", html(report()))
             path.startsWith("/rapor.txt") -> send(out, "text/plain; charset=utf-8", report().toText())
             path == "/apk" || path == "/apk/" -> send(out, "text/html; charset=utf-8", apkPage())
             path.startsWith("/apk/") && path.endsWith(".apk") -> {
@@ -56,7 +77,7 @@ class ReportServer(
                 if (apk == null) send(out, "text/plain; charset=utf-8", "Bulunamadı", 404)
                 else sendFile(out, File(apk.path), "${apk.pkg}.apk")
             }
-            else -> send(out, "text/html; charset=utf-8", html(report()))
+            else -> send(out, "text/plain; charset=utf-8", "Bulunamadı", 404)
         }
     }
 
@@ -71,9 +92,33 @@ class ReportServer(
         out.flush()
     }
 
-    private fun sendFile(out: OutputStream, f: File, name: String) {
+    /**
+     * A file that may still be growing (the recording): its length is taken once and exactly that
+     * many bytes are streamed, so Content-Length is right and memory stays small.
+     */
+    private fun sendGrowing(out: OutputStream, f: File, type: String) {
+        val len = f.length()
         out.write(
-            ("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${f.length()}\r\n" +
+            ("HTTP/1.1 200 OK\r\nContent-Type: $type\r\nContent-Length: $len\r\n" +
+                "Content-Disposition: attachment; filename=\"${f.name}\"\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+                .toByteArray(Charsets.US_ASCII)
+        )
+        f.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            var left = len
+            while (left > 0) {
+                val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                if (n < 0) break
+                out.write(buf, 0, n)
+                left -= n
+            }
+        }
+        out.flush()
+    }
+
+    private fun sendFile(out: OutputStream, f: File, name: String, type: String = "application/octet-stream") {
+        out.write(
+            ("HTTP/1.1 200 OK\r\nContent-Type: $type\r\nContent-Length: ${f.length()}\r\n" +
                 "Content-Disposition: attachment; filename=\"$name\"\r\nConnection: close\r\n\r\n")
                 .toByteArray(Charsets.US_ASCII)
         )
@@ -99,6 +144,7 @@ li{margin:10px 0}
 <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('r').innerText).then(()=>this.textContent='Kopyalandı')">Raporu kopyala</button>
 <a class="btn" href="/rapor.txt" download="kokpit-kesif.txt">Dosya olarak indir</a>
 <a class="btn" href="/apk">Uygulama dosyaları</a>
+<a class="btn" href="/canli">Canlı araç verisi</a>
 <pre id="r">${esc(r.toText())}</pre>
 </body></html>
 """.trimIndent()
@@ -112,7 +158,7 @@ li{margin:10px 0}
 <h1>Üretici uygulamalarının dosyaları</h1>
 <small>Claude bunları inceleyip araç ayarlarına ve CAN verisine nasıl ulaşacağımızı çıkaracak. Önce <b>Oto Can</b>, <b>Araç ayarları</b>, <b>ZLINK</b> ve <b>Ev</b> yeterli.</small>
 <ul>$items</ul>
-<a class="btn" href="/">Rapora dön</a>
+<a class="btn" href="/rapor">Rapora dön</a>
 </body></html>
 """.trimIndent()
     }
