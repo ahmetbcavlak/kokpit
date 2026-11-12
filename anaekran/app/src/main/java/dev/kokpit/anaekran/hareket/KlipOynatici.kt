@@ -29,15 +29,22 @@ import dev.kokpit.anaekran.tema.Palet
  * is GONE or removed: no full-screen layer stays behind (overdraw), and the player is released.
  *
  * Timeline of one [oynat]:
- *  - the clip is prepared at once (prepareAsync), the video view is added as soon as the
- *    poster is decoded; the poster is hidden on the first latched frame after RENDERING_START;
+ *  - the clip is prepared at once (prepareAsync). The video view is added as soon as an
+ *    opaque cover is up (old picture, intro colour, or the poster) — it sits under the cover,
+ *    so it can never flash black; the poster only replaces the cover's picture. The poster is
+ *    requested before the target (the worker thread decodes in order). It is hidden on the
+ *    first latched frame after RENDERING_START;
+ *  - no first frame within [ILK_KARE_SINIR_MS] after the video view was added, or no cover
+ *    at all within [ORTU_SINIR_MS]: the clip is skipped;
  *  - the fade starts when BOTH `tutMs` (since the call) have passed AND the clip has ended —
  *    a slow decoder therefore never gets cut before the car has arrived;
  *  - on completion the TextureView keeps the last frame (no image swap, so no sharpness pop:
- *    the scenes differ from the last frames only by codec softness, PSNR ≈ 34–35 dB);
+ *    the scenes differ from the last frames only by codec softness, PSNR ≈ 34–35 dB)
+ *    [cihazda doğrulanacak: MTK sürücüsü bitişte yüzeyi siyaha çevirmemeli];
  *  - [kes] (tap) fades from the current alpha in [KESME_MS];
- *  - player error, or no first frame within [ILK_KARE_SINIR_MS]: the clip is skipped and the
- *    fade starts at once over the poster — the screen is never left black;
+ *  - player error or skip: the fade starts at once over the poster — never black;
+ *  - our window goes out of sight (another app in front): the decoder is released at once
+ *    and the run ends on its target without a fade (ATLANDI);
  *  - at the end: player released, video view removed, then `bitti` exactly once, then the
  *    target overlay is dropped (same main-thread turn, so the caller must make the scene
  *    layer show the target inside `bitti`).
@@ -57,17 +64,31 @@ class KlipOynatici(
         TAMAM,
         /** [kes] before the normal fade. */
         DOKUNULDU,
-        /** Player error, decoder too slow or poster missing: faded without the clip. */
+        /** Player error, decoder too slow, no cover/poster, or window hidden: ended without the clip. */
         ATLANDI,
         /** A newer [oynat] (or [bitir]) ended this one; the target is on screen. */
         KESILDI,
     }
 
-    /** First-frame timing of the last clip, for logs / a debug line. */
-    data class IlkKare(val klip: Klip, val ilkKareMs: Long)
+    /** Timing of the last clip, for logs / a debug line. Null fields: not reached. */
+    data class KlipOlcumu(val klip: Klip, val ilkKareMs: Long?, val birakmaMs: Long?)
 
-    var sonOlcum: IlkKare? = null
+    var sonOlcum: KlipOlcumu? = null
         private set
+
+    /**
+     * Told when motion starts/stops (clip frames running, fade running) — the frame-rate
+     * counter measures fps over exactly these spans. Not told during the static hold.
+     */
+    var izci: HareketIzci? = null
+
+    /**
+     * true: the video's first frame is on screen — the opaque full-screen video covers the
+     * scene layer, which can be made INVISIBLE (no fill per frame). false: the video is about
+     * to go (always before `bitti`, while the opaque target overlay is up) — show it again.
+     * Only called in pairs.
+     */
+    var videoGorunurlugu: ((Boolean) -> Unit)? = null
 
     val calisiyor: Boolean get() = aktif != null
 
@@ -84,7 +105,9 @@ class KlipOynatici(
         var hedef: Drawable? = null
         var hedefYok = false
         var oynatici: Oynatici? = null
+        var videoEklendi = false
         var posterGeldi = false
+        var videoGorundu = false
         var tutuldu = false
         var klipBitti = klip == null
         var basladi = false
@@ -92,11 +115,14 @@ class KlipOynatici(
         var solma = false
         var animasyonda = false
         var bekleyenMs = -1L
+        var izAcik = false
+        var ilkKareMs: Long? = null
         var sonuc = Sonuc.TAMAM
         var bittiCagrildi = false
 
         val tutBitti = Runnable { tutuldu = true; ilerle(this) }
         val zamanAsimi = Runnable { atla(this, "ilk kare ${ILK_KARE_SINIR_MS} ms içinde gelmedi") }
+        val ortuSiniri = Runnable { if (!videoEklendi) atla(this, "örtü/poster ${ORTU_SINIR_MS} ms içinde gelmedi") }
         val guvenlik = Runnable { atla(this, "klip bitmedi") }
         val hedefBekleme = Runnable { bitir(this) }
     }
@@ -113,7 +139,9 @@ class KlipOynatici(
      * @param gecisMs fade length.
      * @param dokunmaKalkani adds a transparent tap catcher above everything; a tap (DOWN+UP
      *   without movement, no edge gesture) calls [kes]. The caller may route taps to [kes] instead.
-     * @param bitti called exactly once per call (unless [birak] comes first), on the main thread.
+     * @param bitti called exactly once per call (unless [birak] comes first), on the main
+     *   thread. Starting a new [oynat] from inside it is fine (also from a KESILDI callback:
+     *   that new run is then itself ended with KESILDI, nothing leaks).
      */
     fun oynat(
         klip: Klip?,
@@ -124,7 +152,14 @@ class KlipOynatici(
         dokunmaKalkani: Boolean = false,
         bitti: (Sonuc) -> Unit,
     ) {
-        aktif?.let { kesildi(it) }
+        // A KESILDI callback may start another run; end those too until nothing runs.
+        var koruma = 0
+        while (koruma++ < KESME_ZINCIRI) {
+            val a = aktif ?: break
+            kesildi(a)
+        }
+        aktif?.let { temizle(it); aktif = null } // a caller looping on KESILDI: drop silently
+
         val i = Istek(klip, gecisMs, bitti)
         aktif = i
         val o = ortuGorunumu()
@@ -139,9 +174,23 @@ class KlipOynatici(
         if (onceki != null) ortuGoster(onceki)
 
         if (eski != null) {
-            yukleyici.yukle(res, eski) { d -> if (aktif === i && d != null && !i.posterGeldi) ortuGoster(d) }
+            yukleyici.yukle(res, eski) { d -> if (aktif === i && d != null) ortuHazir(i, d, poster = false) }
         } else if (klip?.acilis == true && o.visibility != View.VISIBLE) {
             ortuGoster(ColorDrawable(ACILIS_RENGI))
+        }
+
+        if (klip != null) {
+            val oy = oynaticiUret(ctx)
+            i.oynatici = oy
+            oy.hazirla(klip.ham, dinleyici(i))
+            // Poster before the target: the worker decodes in order and the video waits for a cover.
+            yukleyici.yukle(res, klip.poster) { d ->
+                if (aktif !== i || i.solma) return@yukle
+                if (d != null) ortuHazir(i, d, poster = true)
+                else if (!i.videoEklendi) atla(i, "poster çözülemedi")
+            }
+            if (o.visibility == View.VISIBLE) videoyuEkle(i)
+            if (!i.videoEklendi) ana.postDelayed(i.ortuSiniri, ORTU_SINIR_MS)
         }
 
         yukleyici.yukle(res, hedef) { d ->
@@ -150,23 +199,6 @@ class KlipOynatici(
             if (i.solma && !i.animasyonda) {
                 if (d == null) bitir(i) else solmayiCalistir(i, d, i.bekleyenMs)
             }
-        }
-
-        if (klip != null) {
-            val oy = oynaticiUret(ctx)
-            i.oynatici = oy
-            oy.hazirla(klip.ham, dinleyici(i))
-            yukleyici.yukle(res, klip.poster) { d ->
-                if (aktif !== i || i.solma) return@yukle
-                if (d == null) {
-                    atla(i, "poster çözülemedi")
-                    return@yukle
-                }
-                i.posterGeldi = true
-                ortuGoster(d)
-                videoyuEkle(i)
-            }
-            ana.postDelayed(i.zamanAsimi, ILK_KARE_SINIR_MS)
         }
 
         if (dokunmaKalkani) kalkanEkle()
@@ -217,8 +249,10 @@ class KlipOynatici(
             i.basladi = true
             ana.removeCallbacks(i.zamanAsimi)
             val ms = SystemClock.uptimeMillis() - i.t0
-            i.klip?.let { sonOlcum = IlkKare(it, ms) }
+            i.ilkKareMs = ms
+            i.klip?.let { sonOlcum = KlipOlcumu(it, ms, null) }
             Log.i(ETIKET, "${i.klip}: ilk kare oynat'tan $ms ms")
+            if (!i.solma) izAc(i)
             posterKaldir(i)
         }
 
@@ -233,19 +267,47 @@ class KlipOynatici(
             if (aktif !== i) return
             i.klipBitti = true
             ana.removeCallbacks(i.guvenlik)
+            if (!i.solma) izKapa(i) // the hold is static: not motion
             ilerle(i)
         }
 
         override fun hata(neden: String) {
             if (aktif === i) atla(i, neden)
         }
+
+        override fun pencereGizlendi() {
+            if (aktif !== i) return
+            Log.i(ETIKET, "${i.klip}: pencere gizlendi, geçişsiz bitiyor")
+            i.sonuc = Sonuc.ATLANDI
+            val u = ustGorunumu()
+            u.animate().cancel()
+            i.hedef?.let {
+                if (u.drawable !== it) u.setImageDrawable(it)
+                u.alpha = 1f
+                u.visibility = View.VISIBLE
+            }
+            bitir(i)
+        }
+    }
+
+    /** A cover picture arrived (old picture or poster). */
+    private fun ortuHazir(i: Istek, d: Drawable, poster: Boolean) {
+        // Once a decoded frame is showing, a late cover must not come back over the video.
+        if (i.videoGorundu) return
+        // The old picture arriving after the poster must not replace it (the poster is the first frame).
+        if (!poster && i.posterGeldi) return
+        if (poster) i.posterGeldi = true
+        ortuGoster(d)
+        if (i.klip != null && !i.solma) videoyuEkle(i)
     }
 
     private fun videoyuEkle(i: Istek) {
+        if (i.videoEklendi) return
         val v = i.oynatici?.gorunum ?: return
+        i.videoEklendi = true
+        ana.removeCallbacks(i.ortuSiniri)
         if (v.parent == null) kap.addView(v, 0, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        // Count the first-frame limit from the moment the video can actually draw.
-        ana.removeCallbacks(i.zamanAsimi)
+        // The first-frame limit counts from the moment the video can actually draw.
         if (!i.basladi && !i.kareGeldi) ana.postDelayed(i.zamanAsimi, ILK_KARE_SINIR_MS)
         val klip = i.klip ?: return
         ana.postDelayed(i.guvenlik, ILK_KARE_SINIR_MS + klip.sureMs + 1000L)
@@ -253,11 +315,13 @@ class KlipOynatici(
 
     /** Hide the poster only when a decoded frame is both pushed and latched (no empty texture shows). */
     private fun posterKaldir(i: Istek) {
-        if (!i.basladi || !i.kareGeldi || i.solma) return
+        if (!i.basladi || !i.kareGeldi || i.solma || i.videoGorundu) return
         ortu?.let {
             it.visibility = View.GONE
             it.setImageDrawable(null)
         }
+        i.videoGorundu = true
+        videoGorunurlugu?.invoke(true)
     }
 
     private fun atla(i: Istek, neden: String) {
@@ -282,6 +346,7 @@ class KlipOynatici(
         i.solma = true
         ana.removeCallbacks(i.tutBitti)
         ana.removeCallbacks(i.zamanAsimi)
+        ana.removeCallbacks(i.ortuSiniri)
         ana.removeCallbacks(i.guvenlik)
         val d = i.hedef
         when {
@@ -302,6 +367,7 @@ class KlipOynatici(
         if (u.drawable !== d) u.setImageDrawable(d)
         u.visibility = View.VISIBLE
         i.animasyonda = true
+        izAc(i)
         val kalan = (1f - u.alpha).coerceIn(0f, 1f)
         // No withLayer(): an ImageView without background reports hasOverlappingRendering()
         // = false (AOSP oreo-mr1 ImageView l.288), so HWUI folds the alpha into its single
@@ -349,9 +415,11 @@ class KlipOynatici(
     private fun temizle(i: Istek) {
         ana.removeCallbacks(i.tutBitti)
         ana.removeCallbacks(i.zamanAsimi)
+        ana.removeCallbacks(i.ortuSiniri)
         ana.removeCallbacks(i.guvenlik)
         ana.removeCallbacks(i.hedefBekleme)
         i.animasyonda = false
+        izKapa(i)
         videoyuBirak(i)
         kalkanKaldir()
         ortu?.let {
@@ -363,8 +431,25 @@ class KlipOynatici(
     private fun videoyuBirak(i: Istek) {
         val oy = i.oynatici ?: return
         i.oynatici = null
-        oy.birak()
+        if (i.videoGorundu) {
+            i.videoGorundu = false
+            videoGorunurlugu?.invoke(false)
+        }
+        val ms = oy.birak()
         kap.removeView(oy.gorunum)
+        i.klip?.let { sonOlcum = KlipOlcumu(it, i.ilkKareMs, ms) }
+    }
+
+    private fun izAc(i: Istek) {
+        if (i.izAcik) return
+        i.izAcik = true
+        izci?.hareketBasladi()
+    }
+
+    private fun izKapa(i: Istek) {
+        if (!i.izAcik) return
+        i.izAcik = false
+        izci?.hareketBitti()
     }
 
     // --- Views ---
@@ -455,14 +540,20 @@ class KlipOynatici(
     companion object {
         const val ETIKET = "Kokpit/Hareket"
 
-        /** No first frame within this time after the video can draw → skip the clip. */
+        /** No first frame within this time after the video view was added → skip the clip. */
         const val ILK_KARE_SINIR_MS = 1500L
+
+        /** No opaque cover (old picture / poster) within this time → skip (the video never got added). */
+        const val ORTU_SINIR_MS = 3000L
 
         /** Tap cut. */
         const val KESME_MS = 150L
 
         /** Target picture still not decoded when the fade should start → end without it. */
         const val HEDEF_SINIR_MS = 1000L
+
+        /** Max. runs ended in one [oynat] when KESILDI callbacks keep starting new ones. */
+        private const val KESME_ZINCIRI = 8
 
         /** Intro cover until the poster is decoded: the window colour (styles.xml ilk_kare). */
         val ACILIS_RENGI = Palet.GECE.bg

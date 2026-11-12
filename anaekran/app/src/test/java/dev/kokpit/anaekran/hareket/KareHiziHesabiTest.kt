@@ -64,15 +64,77 @@ class KareHiziHesabiTest {
         var son: Sonuc? = null
         while (son == null) { t += vs; h.cizildi(t); son = h.vsync(t) }
         assertEquals(120, (son as Sonuc.Olcum).enUzunMs)
-        // The stall is longer than the 100 ms gap limit: it does not drag the fps down.
-        assertEquals(60, son.fps)
+        // Gaps up to 300 ms count: the stall shows in the fps too.
+        assertTrue("fps ${son.fps}", son.fps in 40..55)
     }
 
     @Test
-    fun tekTukCizimHareketSayilmaz() {
+    fun hareketDisindaTekTukCizimSayilmaz() {
+        // Two isolated redraws (clock, data) outside any known motion: not "motion".
         val h = KareHiziHesabi()
-        val s = h.calistir(0, 31) { it == 3 || it == 9 } // two isolated redraws (clock, data)
+        val s = h.calistir(0, 31) { it == 3 || it == 9 }
         assertEquals(listOf(Sonuc.Bos), s)
+    }
+
+    @Test
+    fun hareketIcindeSeyrekCizimDeSayilir() {
+        // The same sparse draws during a known motion are a real (bad) frame rate.
+        val h = KareHiziHesabi()
+        h.vsync(0)
+        h.hareketBasladi(0)
+        val s = h.calistir(vs, 30) { it == 3 || it == 9 }
+        assertEquals(4, (s.single() as Sonuc.Olcum).fps)
+    }
+
+    @Test
+    fun sekizFpsTakilanKlipSekizOkunur() {
+        // A weak decoder: the clip delivers a frame every 125 ms; the main thread is free.
+        val h = KareHiziHesabi()
+        h.vsync(0)
+        h.hareketBasladi(0)
+        val sonuclar = ArrayList<Sonuc>()
+        var t = 0L
+        var sonrakiKare = 125 * ms
+        while (t < 1000 * ms) {
+            t += vs
+            if (t >= sonrakiKare) { h.cizildi(t); sonrakiKare += 125 * ms }
+            h.vsync(t)?.let { sonuclar += it }
+        }
+        h.hareketBitti(t)
+        assertEquals(2, sonuclar.size)
+        for (o in sonuclar) {
+            o as Sonuc.Olcum
+            assertEquals(8, o.fps)
+            assertTrue("en uzun kare ≈125 ms, ${o.enUzunMs}", o.enUzunMs in 120..140)
+        }
+    }
+
+    @Test
+    fun donmusKlipSifirOkunur() {
+        val h = KareHiziHesabi()
+        h.vsync(0)
+        h.hareketBasladi(0)
+        val s = h.calistir(vs, 30) { false }
+        val o = s.single() as Sonuc.Olcum
+        assertEquals(0, o.fps)
+        assertTrue(o.enUzunMs >= 480)
+    }
+
+    @Test
+    fun hareketPencereninBirKismindaysa_yalnizOAraliktanHesaplanir() {
+        // 200 ms of 60 fps motion, then still; the window is 500 ms.
+        val h = KareHiziHesabi()
+        h.vsync(0)
+        h.hareketBasladi(0)
+        var t = 0L
+        var s: Sonuc? = null
+        for (k in 1..30) {
+            t = k * vs
+            if (k <= 12) h.cizildi(t)
+            if (k == 12) h.hareketBitti(t)
+            h.vsync(t)?.let { s = it }
+        }
+        assertEquals(60, (s as Sonuc.Olcum).fps)
     }
 
     @Test

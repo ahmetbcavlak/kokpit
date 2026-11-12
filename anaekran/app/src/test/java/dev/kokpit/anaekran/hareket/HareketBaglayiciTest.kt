@@ -32,7 +32,7 @@ class HareketBaglayiciTest {
         var d: Oynatici.Dinleyici? = null
         var birakildi = false
         override fun hazirla(klipHam: Int, d: Oynatici.Dinleyici) { this.d = d }
-        override fun birak() { birakildi = true }
+        override fun birak(): Long { birakildi = true; return 0L }
     }
 
     @Before

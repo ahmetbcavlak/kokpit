@@ -88,6 +88,20 @@ class YumusakGecisTest {
     }
 
     @Test
+    fun hareketIziHizliCagrilardaDengeli() {
+        var acik = 0
+        g.izci = object : HareketIzci {
+            override fun hareketBasladi() { acik++ }
+            override fun hareketBitti() { acik-- }
+        }
+        g.gec(a, b) {}
+        g.gec(b, c) {}
+        assertEquals(1, acik)
+        bekle(400)
+        assertEquals(0, acik)
+    }
+
+    @Test
     fun eskiYoksaYalnizGirer() {
         var n = 0
         g.gec(null, b) { n++ }

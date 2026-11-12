@@ -33,10 +33,17 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  *  5. In every `bitti`, the scene layer must show the target by the time `bitti` returns: the
  *     overlay is removed in the same main-thread turn. With the `Int` overloads the target was
  *     decoded through `Gorseller`, so `SahneKatmani.goster` gets it from the cache synchronously.
- *     `Sonuc.KESILDI` means a newer call took over: do not start another call from that callback.
+ *     `Sonuc.KESILDI` means a newer call took over. Starting a new call from any callback is
+ *     safe (a run started from a KESILDI callback is itself ended with KESILDI).
+ *  6. Scene layer while a clip plays (the opaque video covers it, but HWUI would still fill it
+ *     every frame):
+ *     `hareket.videoGorunurlugu = { v -> katmanlar.sahne.visibility = if (v) View.INVISIBLE else View.VISIBLE }`
+ *     — `true` comes when the video's first frame is on screen, `false` before the video is
+ *     removed (always before `bitti`, while the opaque target overlay covers the screen), in pairs.
+ *     INVISIBLE, not GONE: the scene keeps its size and its bitmap. Can be set before or after [kur].
  *
- * Optional (not done here, scene layer is not ours): hide `katmanlar.sahne` while a clip plays
- * — the opaque video covers it, but HWUI still fills it every frame.
+ * The counter measures fps over the clip / fade / screen-transition spans these components
+ * report (HareketIzci); nothing to wire for that.
  */
 class HareketBaglayici(
     private val oynaticiUret: (Context) -> Oynatici = { DokuOynatici(it) },
@@ -44,8 +51,17 @@ class HareketBaglayici(
     private val kareKaynagi: KareKaynagi = KareKaynagi.CHOREOGRAPHER,
 ) : Baglayici, TemaDinleyici {
 
+    private val yumusakGecis = YumusakGecis()
+
     /** Screen transition for `EkranYoneticisi.gecis`. */
-    val gecis: Gecis = YumusakGecis()
+    val gecis: Gecis get() = yumusakGecis
+
+    /** See wiring step 6. */
+    var videoGorunurlugu: ((Boolean) -> Unit)? = null
+        set(value) {
+            field = value
+            oynatici?.videoGorunurlugu = value
+        }
 
     var oynatici: KlipOynatici? = null
         private set
@@ -63,7 +79,11 @@ class HareketBaglayici(
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
         )
         sayac = s
-        oynatici = KlipOynatici(katmanlar.video, katmanlar.kok, oynaticiUret, yukleyici)
+        yumusakGecis.izci = s
+        oynatici = KlipOynatici(katmanlar.video, katmanlar.kok, oynaticiUret, yukleyici).also {
+            it.izci = s
+            it.videoGorunurlugu = videoGorunurlugu
+        }
         Tema.dinle(this)
     }
 
@@ -71,13 +91,18 @@ class HareketBaglayici(
         sayac?.basla()
     }
 
-    /** The clip is left to finish (a permission dialog must not cut the intro). */
+    /**
+     * The clip is not cut here: a permission dialog pauses us while our window stays visible,
+     * and must not cut the intro. When another app really comes to the front, the window goes
+     * out of sight and the player releases the decoder by itself (Oynatici.Dinleyici.pencereGizlendi).
+     */
     override fun dur() {
         sayac?.dur()
     }
 
     override fun birak() {
         sayac?.dur()
+        yumusakGecis.izci = null
         oynatici?.birak()
         Tema.birak(this)
     }

@@ -38,7 +38,7 @@ class KlipOynaticiTest {
         var klip = 0
         var birakildi = false
         override fun hazirla(klipHam: Int, d: Oynatici.Dinleyici) { klip = klipHam; dinleyici = d }
-        override fun birak() { birakildi = true; dinleyici = null }
+        override fun birak(): Long { birakildi = true; dinleyici = null; return 7L }
 
         /** Decoder output: RENDERING_START, then the view latches the frame. */
         fun ilkKare() { dinleyici?.basladi(); dinleyici?.kareGeldi() }
@@ -55,6 +55,18 @@ class KlipOynaticiTest {
     private val gelmeyen = HashSet<String>()
     private val bos = HashSet<String>()
 
+    /** Pictures held back until [teslim] (an asynchronous worker). */
+    private val bekletilen = HashSet<String>()
+    private val bekleyenTeslim = LinkedHashMap<String, (Drawable?) -> Unit>()
+
+    /** Order in which pictures were requested (the worker decodes in this order). */
+    private val istekSirasi = ArrayList<String>()
+
+    private fun teslim(a: String) {
+        val cb = bekleyenTeslim.remove(a) ?: error("$a beklenmiyor")
+        cb(cizimler.getOrPut(a) { ColorDrawable(Color.rgb(a.hashCode() and 255, 10, 20)) })
+    }
+
     private fun ad(g: Goruntu) = when (g) {
         is Goruntu.Hazir -> "hazir"
         is Goruntu.Kaynak -> "k${g.id}"
@@ -63,8 +75,10 @@ class KlipOynaticiTest {
 
     private val yukleyici = GorselYukleyici { _, g, sonra ->
         val a = ad(g)
+        istekSirasi += a
         when (a) {
             in gelmeyen -> Unit
+            in bekletilen -> bekleyenTeslim[a] = sonra
             in bos -> sonra(null)
             else -> sonra(cizimler.getOrPut(a) { ColorDrawable(Color.rgb(a.hashCode() and 255, 10, 20)) })
         }
@@ -235,14 +249,17 @@ class KlipOynaticiTest {
     }
 
     @Test
-    fun posterGelmezse_videoEklenmez_zamanAsimindaAtlar() {
+    fun posterGelmezse_videoRenkOrtusununAltinda_zamanAsimindaAtlar() {
         gelmeyen += "h${(Klip.GIRIS.poster as Goruntu.Ham).id}"
+        val t0 = SystemClock.uptimeMillis()
         acilis()
         val o = oynaticilar.single()
-        assertNull("örtüsüz video eklenmez", o.gorunum.parent)
-        assertEquals("açılışta pencere rengiyle örtülü", View.VISIBLE, ortu.visibility)
-        bekle(1600)
-        bekle(400)
+        assertSame("renk örtüsü görünürken video hemen eklenir", video, o.gorunum.parent)
+        assertEquals(View.VISIBLE, ortu.visibility)
+        assertTrue(ortu.drawable is ColorDrawable)
+        bekleKadar(t0, 1490)
+        assertTrue(sonuclar.isEmpty())
+        bekleKadar(t0, 2000)
         assertEquals(listOf(Sonuc.ATLANDI), sonuclar)
         hepsiTemiz()
     }
@@ -346,5 +363,172 @@ class KlipOynaticiTest {
         assertTrue(oynaticilar.single().birakildi)
         assertEquals(0, video.childCount)
         assertEquals(1, kok.childCount)
+    }
+
+    @Test
+    fun soguk_acilis_posterHedeftenOnceIstenir_videoBeklemez() {
+        val poster = "h${(Klip.GIRIS.poster as Goruntu.Ham).id}"
+        bekletilen += poster
+        bekletilen += "k1001"
+        val t0 = SystemClock.uptimeMillis()
+        acilis()
+        assertTrue("poster hedeften önce kuyrukta", istekSirasi.indexOf(poster) < istekSirasi.indexOf("k1001"))
+        val o = oynaticilar.single()
+        assertSame("video poster beklemeden, renk örtüsünün altında", video, o.gorunum.parent)
+        // The worker is slow: the poster comes at 1.2 s, the first frame at 1.3 s — no skip.
+        bekleKadar(t0, 1200)
+        teslim(poster)
+        assertSame(cizimler[poster], ortu.drawable)
+        bekleKadar(t0, 1300)
+        o.ilkKare()
+        assertEquals(View.GONE, ortu.visibility)
+        bekleKadar(t0, 1600)
+        o.dinleyici!!.bitti()
+        teslim("k1001")
+        bekleKadar(t0, 2200)
+        assertEquals(listOf(Sonuc.TAMAM), sonuclar)
+        hepsiTemiz()
+    }
+
+    @Test
+    fun ilkKareSiniri_videoEklendigiAndanSayilir() {
+        // Transition with no cover yet: the video waits for the poster (decoded at 1 s).
+        val poster = "k${(Klip.SURUS.poster as Goruntu.Kaynak).id}"
+        bekletilen += poster
+        val t0 = SystemClock.uptimeMillis()
+        k.oynat(Klip.SURUS, null, HEDEF, 0L, 200L, bitti = kaydet)
+        val o = oynaticilar.single()
+        assertNull(o.gorunum.parent)
+        bekleKadar(t0, 1000)
+        teslim(poster)
+        assertSame(video, o.gorunum.parent)
+        bekleKadar(t0, 2400) // 1.4 s after the video was added: still waiting
+        assertTrue(sonuclar.isEmpty())
+        bekleKadar(t0, 2800)
+        assertEquals(listOf(Sonuc.ATLANDI), sonuclar)
+        hepsiTemiz()
+    }
+
+    @Test
+    fun ortuHicGelmezse_ayriUzunSinirdaAtlar() {
+        gelmeyen += "k${(Klip.SURUS.poster as Goruntu.Kaynak).id}"
+        val t0 = SystemClock.uptimeMillis()
+        k.oynat(Klip.SURUS, null, HEDEF, 0L, 200L, bitti = kaydet)
+        bekleKadar(t0, 2900)
+        assertTrue(sonuclar.isEmpty())
+        bekleKadar(t0, 3400)
+        assertEquals(listOf(Sonuc.ATLANDI), sonuclar)
+        hepsiTemiz()
+    }
+
+    @Test
+    fun eskiPostertenSonraGelirsePosteriEzmez() {
+        bekletilen += "k1003"
+        k.oynat(Klip.SURUS, ESKI, HEDEF, 0L, 200L, bitti = kaydet)
+        val posterAd = "k${(Klip.SURUS.poster as Goruntu.Kaynak).id}"
+        assertSame(cizimler[posterAd], ortu.drawable)
+        teslim("k1003")
+        assertSame(cizimler[posterAd], ortu.drawable)
+    }
+
+    @Test
+    fun pencereGizlenince_gecissizHemenBiter() {
+        val goruntuler = ArrayList<Boolean>()
+        k.videoGorunurlugu = { goruntuler += it }
+        acilis()
+        val o = oynaticilar.single()
+        bekle(100)
+        o.ilkKare()
+        val d = o.dinleyici!!
+        o.birak() // DokuOynatici releases before telling
+        d.pencereGizlendi()
+        assertEquals(listOf(Sonuc.ATLANDI), sonuclar)
+        hepsiTemiz()
+        assertEquals(listOf(true, false), goruntuler)
+    }
+
+    @Test
+    fun videoGorunurluguCiftHalinde_bittidenOnceKapanir() {
+        val olaylar = ArrayList<String>()
+        k.videoGorunurlugu = { olaylar += "video:$it" }
+        k.oynat(Klip.SURUS, ESKI, HEDEF, 0L, 200L) { olaylar += "bitti:$it" }
+        val o = oynaticilar.single()
+        o.dinleyici!!.basladi()
+        assertTrue("çerçeve çizilmeden sahne gizlenmez", olaylar.isEmpty())
+        o.dinleyici!!.kareGeldi()
+        assertEquals(listOf("video:true"), olaylar)
+        o.dinleyici!!.bitti()
+        bekle(400)
+        assertEquals(listOf("video:true", "video:false", "bitti:TAMAM"), olaylar)
+        assertEquals(7L, k.sonOlcum?.birakmaMs)
+        assertNotNull(k.sonOlcum?.ilkKareMs)
+    }
+
+    @Test
+    fun hareketIzi_klipVeSolmaSirasindaAcik_tutmadaKapali() {
+        var acik = 0
+        val izler = ArrayList<Int>()
+        k.izci = object : HareketIzci {
+            override fun hareketBasladi() { acik++; izler += acik }
+            override fun hareketBitti() { acik--; izler += acik }
+        }
+        val t0 = SystemClock.uptimeMillis()
+        acilis()
+        val o = oynaticilar.single()
+        assertEquals("poster duruyor: hareket yok", 0, acik)
+        o.ilkKare()
+        assertEquals(1, acik)
+        bekleKadar(t0, 1333)
+        o.dinleyici!!.bitti()
+        assertEquals("tutma süresi durgun", 0, acik)
+        bekleKadar(t0, 1700)
+        assertEquals("solma", 1, acik)
+        bekleKadar(t0, 2200)
+        assertEquals(0, acik)
+        assertEquals(listOf(1, 0, 1, 0), izler)
+    }
+
+    @Test
+    fun kesildiGeriCagrisindanYeniOynat_sizmaz() {
+        var araSonuc: Sonuc? = null
+        k.oynat(Klip.SURUS, ESKI, HEDEF, 0L, 200L) { s ->
+            sonuclar += s
+            if (s == Sonuc.KESILDI) k.oynat(Klip.SURUS_GERI, null, HEDEF2, 0L, 200L) { araSonuc = it }
+        }
+        var sonSonuc: Sonuc? = null
+        k.oynat(Klip.SURUS, null, HEDEF, 0L, 200L) { sonSonuc = it }
+        assertEquals(listOf(Sonuc.KESILDI), sonuclar)
+        assertEquals("aradaki çağrı da temizce kesildi", Sonuc.KESILDI, araSonuc)
+        assertEquals(3, oynaticilar.size)
+        assertTrue(oynaticilar[0].birakildi)
+        assertTrue(oynaticilar[1].birakildi)
+        assertNull(oynaticilar[1].gorunum.parent)
+        val son = oynaticilar[2]
+        assertFalse(son.birakildi)
+        son.ilkKare()
+        son.dinleyici!!.bitti()
+        bekle(400)
+        assertEquals(Sonuc.TAMAM, sonSonuc)
+        hepsiTemiz()
+    }
+
+    @Test
+    fun hedefBeklenirkenKes_hedefGelinceHizliSolar() {
+        bekletilen += "k1001"
+        acilis()
+        val o = oynaticilar.single()
+        o.ilkKare()
+        bekle(200)
+        k.kes()
+        bekle(500)
+        assertTrue("hedef yok: bekliyor", sonuclar.isEmpty())
+        assertEquals(View.GONE, ust.visibility)
+        teslim("k1001")
+        assertEquals(View.VISIBLE, ust.visibility)
+        bekle(100)
+        assertTrue(sonuclar.isEmpty())
+        bekle(150)
+        assertEquals(listOf(Sonuc.DOKUNULDU), sonuclar)
+        hepsiTemiz()
     }
 }

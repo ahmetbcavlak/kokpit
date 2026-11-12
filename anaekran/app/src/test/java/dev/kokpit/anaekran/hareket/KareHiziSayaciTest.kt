@@ -109,6 +109,25 @@ class KareHiziSayaciTest {
     }
 
     @Test
+    fun bilinenHareketCizimsizDeDonguyuCalistirir_veTakilmayiGosterir() {
+        sayac.basla()
+        kareler(40, ciz = false)
+        assertTrue("durgun: döngü durdu", kaynak.bekleyen.isEmpty())
+        sayac.hareketBasladi()
+        assertEquals("hareket döngüyü başlatır", 1, kaynak.bekleyen.size)
+        // 8 fps stutter for 1 s.
+        repeat(60) { k ->
+            simdi += vs
+            if (k % 8 == 0) cizimBildir()
+            kaynak.vsync(simdi)
+        }
+        assertEquals(8, sayac.gosterilen?.fps)
+        sayac.hareketBitti()
+        kareler(70, ciz = false)
+        assertTrue("hareket bitti, durgun: döngü durdu", kaynak.bekleyen.isEmpty())
+    }
+
+    @Test
     fun hicHareketYoksaCizgiGosterir() {
         sayac.basla()
         kareler(40, ciz = false)

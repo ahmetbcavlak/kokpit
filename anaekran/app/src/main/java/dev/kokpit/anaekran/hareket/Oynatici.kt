@@ -13,7 +13,8 @@ import android.view.View
 
 /**
  * One clip playback: a view to put in the video layer and a player behind it.
- * Tests swap in a fake; the app uses [DokuOynatici]. All callbacks on the main thread.
+ * Tests swap in a fake; the app uses [DokuOynatici]. All callbacks on the main thread, never
+ * from inside a draw or a call into the player (they are posted).
  */
 interface Oynatici {
     /** The view that shows the video. KlipOynatici adds it under its own image views. */
@@ -22,8 +23,8 @@ interface Oynatici {
     /** Starts preparing at once; playback starts as soon as the view's surface exists. */
     fun hazirla(klipHam: Int, d: Dinleyici)
 
-    /** Stops and frees the decoder. Idempotent; no callbacks afterwards. */
-    fun birak()
+    /** Stops and frees the decoder. Idempotent; no callbacks afterwards. Returns the release time in ms (0 if nothing was held). */
+    fun birak(): Long
 
     interface Dinleyici {
         /** MEDIA_INFO_VIDEO_RENDERING_START: the decoder pushed its first frame. */
@@ -36,6 +37,13 @@ interface Oynatici {
         fun bitti()
 
         fun hata(neden: String)
+
+        /**
+         * The window went out of sight (another app — CarPlay/ZLink — came to the front). The
+         * decoder has ALREADY been released: the head unit's hardware H.264 decoder is needed
+         * by the app in front. Not sent for a dialog over us: the window stays visible then.
+         */
+        fun pencereGizlendi()
     }
 }
 
@@ -52,10 +60,26 @@ interface Oynatici {
  * view: no window change, the image views above it blend normally, it keeps showing its
  * last latched frame after completion, and it is removed like any view. Its cost — one
  * GPU texture copy per video frame — lasts only for the 0.8–1.33 s clip.
+ *
+ * [oynaticiUret] / [kaynakVer] exist for tests (Robolectric's ShadowMediaPlayer).
  */
-class DokuOynatici(context: Context) : Oynatici, TextureView.SurfaceTextureListener {
+class DokuOynatici(
+    context: Context,
+    private val oynaticiUret: () -> MediaPlayer = { MediaPlayer() },
+    private val kaynakVer: (MediaPlayer, Context, Int) -> Unit = { mp, c, id ->
+        c.resources.openRawResourceFd(id).use { fd -> mp.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length) }
+    },
+) : Oynatici, TextureView.SurfaceTextureListener {
 
-    private val doku = TextureView(context).apply {
+    /** Releases the decoder the moment the window is no longer visible. */
+    private inner class Doku(c: Context) : TextureView(c) {
+        override fun onWindowVisibilityChanged(visibility: Int) {
+            super.onWindowVisibilityChanged(visibility)
+            if (visibility != View.VISIBLE) pencereGizlendi()
+        }
+    }
+
+    private val doku: TextureView = Doku(context).apply {
         isOpaque = true // the video is opaque: HWUI can skip blending
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
@@ -78,7 +102,7 @@ class DokuOynatici(context: Context) : Oynatici, TextureView.SurfaceTextureListe
     override fun hazirla(klipHam: Int, d: Oynatici.Dinleyici) {
         dinleyici = d
         t0 = SystemClock.uptimeMillis()
-        val mp = MediaPlayer()
+        val mp = oynaticiUret()
         oynatici = mp
         mp.setOnPreparedListener {
             hazir = true
@@ -88,23 +112,20 @@ class DokuOynatici(context: Context) : Oynatici, TextureView.SurfaceTextureListe
         mp.setOnInfoListener { _, what, _ ->
             if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
                 Log.i(KlipOynatici.ETIKET, "RENDERING_START: start'tan ${SystemClock.uptimeMillis() - tBasla} ms")
-                dinleyici?.basladi()
+                bildir { it.basladi() }
             }
             false
         }
-        mp.setOnCompletionListener { dinleyici?.bitti() }
+        mp.setOnCompletionListener { bildir { it.bitti() } }
         mp.setOnErrorListener { _, what, extra ->
-            dinleyici?.hata("MediaPlayer hata $what/$extra")
+            hataBildir("MediaPlayer hata $what/$extra")
             true // handled: no OnCompletion after an error
         }
         try {
-            doku.resources.openRawResourceFd(klipHam).use { fd ->
-                mp.setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
-            }
+            kaynakVer(mp, doku.context, klipHam)
             mp.prepareAsync()
         } catch (e: Exception) {
-            // Report on the next turn: the caller is still inside its own set-up.
-            ana.post { dinleyici?.hata("hazırlanamadı: $e") }
+            hataBildir("hazırlanamadı: $e")
         }
     }
 
@@ -115,34 +136,57 @@ class DokuOynatici(context: Context) : Oynatici, TextureView.SurfaceTextureListe
         tBasla = SystemClock.uptimeMillis()
         try {
             mp.start()
-        } catch (e: IllegalStateException) {
-            dinleyici?.hata("başlatılamadı: $e")
+        } catch (e: RuntimeException) {
+            hataBildir("başlatılamadı: $e")
         }
     }
 
-    override fun birak() {
+    /** Posted: listeners may remove this view, which must not happen inside draw or a player call. */
+    private fun bildir(olay: (Oynatici.Dinleyici) -> Unit) {
+        val d = dinleyici ?: return
+        ana.post { if (dinleyici === d) olay(d) }
+    }
+
+    private fun hataBildir(neden: String) = bildir { it.hata(neden) }
+
+    private fun pencereGizlendi() {
+        val d = dinleyici ?: return
+        if (oynatici == null) return
+        Log.i(KlipOynatici.ETIKET, "pencere gizlendi: çözücü bırakıldı")
+        birak()
+        // birak() cleared the listener; tell the owner once, on the next turn.
+        ana.post { d.pencereGizlendi() }
+    }
+
+    override fun birak(): Long {
         dinleyici = null
         ana.removeCallbacksAndMessages(null)
+        var ms = 0L
         oynatici?.let {
             it.setOnPreparedListener(null)
             it.setOnInfoListener(null)
             it.setOnCompletionListener(null)
             it.setOnErrorListener(null)
+            val t = SystemClock.uptimeMillis()
             it.release()
+            ms = SystemClock.uptimeMillis() - t
+            Log.i(KlipOynatici.ETIKET, "release: $ms ms")
         }
         oynatici = null
         yuzey?.release()
         yuzey = null
+        return ms
     }
 
     override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-        val mp = oynatici ?: return
+        val mp = oynatici ?: return // released before the surface came
         val s = Surface(st)
         yuzey = s
         try {
             mp.setSurface(s)
-        } catch (e: IllegalStateException) {
-            dinleyici?.hata("yüzey verilemedi: $e")
+        } catch (e: RuntimeException) {
+            // IllegalStateException / IllegalArgumentException (surface already released)
+            hataBildir("yüzey verilemedi: $e")
             return
         }
         dene()
@@ -153,9 +197,8 @@ class DokuOynatici(context: Context) : Oynatici, TextureView.SurfaceTextureListe
         // (size/visibility changes) carry no video frame and are ignored.
         if (!basladi || kareBildirildi) return
         kareBildirildi = true
-        val d = dinleyici ?: return
         // Posted: the frame is drawn in this pass, so the poster can go in the next one.
-        ana.post { if (dinleyici === d) d.kareGeldi() }
+        bildir { it.kareGeldi() }
     }
 
     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
