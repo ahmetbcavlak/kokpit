@@ -19,11 +19,14 @@ android {
 
     // Release key comes from the environment (same as kesif/). Never commit a keystore or password.
     signingConfigs {
-        create("kokpit") {
-            storeFile = file(System.getenv("KOKPIT_KEYSTORE") ?: "../../keys/kokpit.jks")
-            storePassword = System.getenv("KOKPIT_KEYSTORE_PASSWORD") ?: ""
-            keyAlias = "kokpit"
-            keyPassword = System.getenv("KOKPIT_KEYSTORE_PASSWORD") ?: ""
+        // Ana Ekran has its own key (K-91), separate from Keşif's "kokpit" key. Every release must be
+        // signed with this same key: an update keeps the accessibility service enabled, a
+        // remove-and-install switches it off. The key is never committed (keys/ is git-ignored).
+        create("anaekran") {
+            storeFile = file(System.getenv("ANAEKRAN_KEYSTORE") ?: "../../keys/anaekran.jks")
+            storePassword = System.getenv("ANAEKRAN_KEYSTORE_PASSWORD") ?: ""
+            keyAlias = "anaekran"
+            keyPassword = System.getenv("ANAEKRAN_KEYSTORE_PASSWORD") ?: ""
         }
     }
 
@@ -32,7 +35,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("kokpit")
+            signingConfig = signingConfigs.getByName("anaekran")
         }
     }
 
