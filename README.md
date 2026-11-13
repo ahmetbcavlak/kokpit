@@ -16,6 +16,31 @@ Sürüm: 0.7.1 · 145 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüy
 
 Önceki sürümler `dist/` klasöründe sürüm adıyla duruyor.
 
+## ⬇️ Kokpit Ana Ekran'ı indir
+
+**[▶ Kokpit Ana Ekran'ı indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-anaekran.apk)**
+
+Sürüm: 0.1.0 · 803 KB · Keşif'in yanına ayrı bir uygulama olarak kurulur ("Kokpit"); Keşif silinmez. Araçta Keşif denemelerinden **sonra** dene (K-73).
+
+1. Ekranın tarayıcısında bu sayfayı açıp yukarıdaki bağlantıya dokun. İnince "Yükle"ye dokun.
+2. Kokpit'i aç. Konum izni sorulursa **İzin ver** (hız GPS'ten gelir).
+3. Bir kez: Ayarlar > Erişilebilirlik > **Kokpit kapı uyarısı** > Aç. Yalnız üreticinin kapı/bagaj penceresindeki yazıyı okur; hiçbir şeye dokunmaz, hiçbir şey göndermez.
+
+Sonraki sürümler bunun **üzerine** kurulur (kaldırma): kaldırıp kurmak kapı uyarısı servisini kapatır.
+
+## Kokpit Ana Ekran nedir?
+
+Ekranın yeni ana arayüzü, ilk sürüm. **Araca hiçbir komut göndermez**; klima düğmeleri 0.1'de yalnız gösterim.
+
+- **Açılış:** araç sahneye girer (klip), 1,6 sn sonra park sahnesine geçer; dokununca kesilir.
+- **Park:** saat, dış sıcaklık, klima (sıcaklık, fan, A/C, oto), kapı ve bagaj durumu.
+- **Sürüş:** 10 km/sa üstünde GPS hızı; durunca parka döner.
+- **Kapı / bagaj açık:** uyarı; kapanınca kısa "kapandı" onayı. Takılırsa uyarıya uzun bas.
+- **Klima paneli:** alt çubukta sol köşe; yalnız gösterim.
+- **Alt çubuk:** CarPlay, Harita, Telefon → ZLink · Müzik → medya oynatıcı · Uygulamalar → yüklü uygulamalar.
+- **Kare hızı ve teşhis:** sağ üst köşedeki sayaç; uzun basınca teşhis paneli (ham klima değerleri, kapı olayları, klip ölçümü).
+- Gece/gündüz teması gün doğumu ve batımına göre.
+
 ## Kokpit Keşif nedir?
 
 Ekranı ve araçtan gelen veriyi tanımak için küçük bir uygulama. **Yalnızca okur, hiçbir ayarı değiştirmez, araca hiçbir şey göndermez.**
@@ -76,9 +101,12 @@ Rapor, aynı hotspot'a bağlı iPad'den `http://<ekranın adresi>:8080/rapor` il
 
 ## İmza anahtarı
 
-APK'lar `kokpit` anahtarıyla imzalanır. Anahtar depoda değil, GitHub'da gizli değişken olarak saklanır: `KOKPIT_KEYSTORE_B64` (anahtar dosyasının base64'ü) ve `KOKPIT_KEYSTORE_PASSWORD`. Derlerken dosyayı `keys/kokpit.jks` olarak açıp parolayı ortam değişkeniyle ver.
+Keşif APK'ları `kokpit` anahtarıyla imzalanır. Anahtar depoda değil, GitHub'da gizli değişken olarak saklanır: `KOKPIT_KEYSTORE_B64` (anahtar dosyasının base64'ü) ve `KOKPIT_KEYSTORE_PASSWORD`. Derlerken dosyayı `keys/kokpit.jks` olarak açıp parolayı ortam değişkeniyle ver.
+
+Ana Ekran kendi `anaekran` anahtarıyla imzalanır (K-91): `keys/anaekran.jks`, parola `ANAEKRAN_KEYSTORE_PASSWORD` (yol `ANAEKRAN_KEYSTORE` ile de verilebilir). Anahtar depoda değil; kullanıcıda saklanır. Her Ana Ekran sürümü aynı anahtarla imzalanmalı.
 
 ## Klasörler
 
+- `anaekran/` — Kokpit Ana Ekran (Kotlin, ek kütüphane yok; yazı tipleri Google Fonts, OFL)
 - `kesif/` — Kokpit Keşif (Kotlin, ek kütüphane yok, yalnızca QR için ZXing)
-- `dist/` — indirme bağlantısının verdiği `kokpit-kesif.apk` ve sürüm adlı arşiv kopyaları
+- `dist/` — indirme bağlantılarının verdiği `kokpit-kesif.apk`, `kokpit-anaekran.apk` ve sürüm adlı arşiv kopyaları
