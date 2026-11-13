@@ -4,15 +4,17 @@
   - No packageNames filter here on purpose: TYPE_WINDOWS_CHANGED arrives without a package name and
     would be dropped. The service itself keeps com.hcn.autocan only (PencereGunlugu).
   - canRetrieveWindowContent + flagRetrieveInteractiveWindows: needed for TYPE_WINDOWS_CHANGED and the window list.
-  - No canPerformGestures, no flagRequestTouchExplorationMode, no key filtering. Window content access would
-    allow clicking nodes; the service never calls performAction (see PencereGunlugu).
+  - flagReportViewIds: resource ids of the dialog's views, for the UI dump (Keşif 0.7).
+  - No canPerformGestures, no flagRequestTouchExplorationMode, no key filtering. The only actions are the
+    close test's: one ACTION_CLICK or GLOBAL_ACTION_BACK, only when the user taps the button and only while a
+    com.hcn.autocan window is on screen (CloseTest).
   - notificationTimeout 0: with a delay the system keeps only the last pending event of a type, so another
     app's window event could replace the door popup's.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
     android:canRetrieveWindowContent="true"
     android:description="@string/pencere_gunlugu_aciklama"
     android:notificationTimeout="0" />

@@ -19,8 +19,9 @@ import java.util.Locale
 /**
  * Window event log for com.hcn.autocan, to see when the door warning popup (CanDoorWindow) appears.
  *
- * It only listens. It never calls performAction, dispatchGesture, performGlobalAction or anything
- * that clicks, touches or types.
+ * By itself it only listens. The one exception is the close test (CloseTest, Keşif 0.7): after the
+ * user taps its button, one ACTION_CLICK or GLOBAL_ACTION_BACK on the door warning window only.
+ * No gestures, no typing.
  *
  * What it sees vs what it keeps: Android delivers window events of every app to the service, and
  * for TYPE_WINDOWS_CHANGED the root node of every window is fetched to learn its package. Anything
@@ -39,14 +40,27 @@ class PencereGunlugu : AccessibilityService() {
     private val autocanWindows = HashMap<Int, String>()
     private var worker: HandlerThread? = null
     private var handler: Handler? = null
+    /** Windows already dumped to arayuz-dokumu.csv; cleared when the window closes. */
+    private val dumped = HashSet<Int>()
+
+    companion object {
+        /** The running service, for the close test button. Null when the service is off. */
+        @Volatile var instance: PencereGunlugu? = null; private set
+    }
 
     override fun onServiceConnected() {
+        instance = this
         WindowLog.connected = true
         post { WindowLog.append(this, System.currentTimeMillis(), "hizmet", "", "", "", "", "", "", "pencere günlüğü açıldı") }
     }
 
     /** The worker thread is made on first use (events can arrive before onServiceConnected). */
-    private fun post(block: () -> Unit) {
+    internal fun postDelayed(ms: Long, block: () -> Unit) {
+        post { }
+        handler?.postDelayed({ try { block() } catch (t: Throwable) { WindowLog.lastError = t.javaClass.simpleName } }, ms)
+    }
+
+    internal fun post(block: () -> Unit) {
         val h = handler ?: HandlerThread("kesif-pencere").also { it.start(); worker = it }
             .let { Handler(it.looper) }.also { handler = it }
         h.post {
@@ -61,6 +75,7 @@ class PencereGunlugu : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val e = event ?: return
+        if (instance == null) instance = this
         try {
             when (e.eventType) {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
@@ -70,8 +85,14 @@ class PencereGunlugu : AccessibilityService() {
                     val cls = e.className?.toString().orEmpty()
                     val text = e.text.joinToString(" | ")
                     val desc = e.contentDescription?.toString().orEmpty()
-                    val win = e.windowId.toString()
-                    post { WindowLog.append(this, at, "TYPE_WINDOW_STATE_CHANGED", WindowLog.PKG, cls, text, desc, win, "", "") }
+                    val winId = e.windowId
+                    val win = winId.toString()
+                    if (winId >= 0 && cls.isNotEmpty()) UiDump.eventClass[winId] = cls
+                    post {
+                        WindowLog.append(this, at, "TYPE_WINDOW_STATE_CHANGED", WindowLog.PKG, cls, text, desc, win, "", "")
+                        // The dialog's component tree, once per window: the event's own window.
+                        if (winId >= 0 && dumped.add(winId)) UiDump.dump(this, winId, "pencere durumu değişti")
+                    }
                 }
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
                     val at = wallTime(e)
@@ -107,9 +128,16 @@ class PencereGunlugu : AccessibilityService() {
         }
         for ((id, title) in autocanWindows) if (id !in now) {
             WindowLog.append(this, at, "TYPE_WINDOWS_CHANGED", WindowLog.PKG, "", "", "", id.toString(), title, "pencere kapandı")
+            dumped.remove(id)
+            UiDump.eventClass.remove(id)
         }
+        val opened = now.keys.filter { it !in autocanWindows && it in details }
         autocanWindows.clear()
         autocanWindows.putAll(now)
+        for (id in opened) if (dumped.add(id)) UiDump.dump(this, id, "pencere açıldı")
+        // A close test armed by the button waits for the first com.hcn.autocan window.
+        if (opened.isNotEmpty() && CloseTest.armed &&
+            UiDump.autocanWindows(this).any { it.id in opened && UiDump.isDoorWindow(this, it) } && CloseTest.consumeArm()) CloseTest.run(this)
     }
 
     /**
@@ -147,6 +175,8 @@ class PencereGunlugu : AccessibilityService() {
 
     override fun onDestroy() {
         WindowLog.connected = false
+        instance = null
+        CloseTest.reset()
         worker?.quitSafely()
         super.onDestroy()
     }

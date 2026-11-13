@@ -19,7 +19,8 @@ import java.util.Locale
  *  - static, from PackageManager: is there such a service, is it exported, does it need a permission
  *  - one bindService() attempt, only when the user taps the button: did the system allow the bind,
  *    and did a connection arrive. The connection is closed with unbindService() as soon as it
- *    arrives (or after 3 s). No method is called on the binder, not even getInterfaceDescriptor.
+ *    arrives (or after 3 s). No method is called on the binder. (The separate interface listing,
+ *    listInterface, asks the binder for its interface name once; nothing else.)
  *
  * The bind uses no BIND_AUTO_CREATE flag: if the service is not already running, the test does
  * not start it. If it is running, binding makes the vendor's onBind() run, and the unbind its
@@ -120,10 +121,70 @@ object ServiceProbe {
         }, WAIT_MS)
     }
 
+    // ---------- AIDL interface listing (Keşif 0.7) ----------
+
+    @Volatile var listing = false; private set
+    @Volatile var interfaceLines: List<Line>? = null; private set
+
+    fun interfaceFile(ctx: Context) = java.io.File(ctx.filesDir, "kayit/servis-arayuzu.txt")
+
+    /**
+     * Lists the methods of the service's AIDL interface, for documentation. Two sources:
+     *  - the service itself: one bind (flags 0) and the binder's standard interface-name query
+     *    (getInterfaceDescriptor, a read-only transaction every binder answers); then unbind
+     *  - the vendor APK's own classes, loaded without running them: method signatures of the
+     *    interface and the TRANSACTION_ codes of its Stub
+     * No method of the interface is ever called; nothing is sent to the vehicle (K-29 still holds).
+     */
+    fun listInterface(ctx: Context, done: () -> Unit) {
+        if (listing) return
+        listing = true
+        val app = ctx.applicationContext
+        val main = Handler(Looper.getMainLooper())
+        var finished = false
+        var bound = false
+        lateinit var conn: ServiceConnection
+        fun next(descriptor: String?, note: String) {
+            if (finished) return
+            finished = true
+            if (bound) runCatching { app.unbindService(conn) }
+            kotlin.concurrent.thread(name = "kesif-aidl") {
+                val lines = try { AidlLister.list(app, PKG, descriptor, note) } catch (t: Throwable) {
+                    listOf(Line("Hata", "${t.javaClass.simpleName}: ${t.message.orEmpty()}"))
+                }
+                interfaceLines = lines
+                runCatching {
+                    interfaceFile(app).apply { parentFile?.mkdirs() }.writeText(
+                        "Kokpit Keşif ${BuildConfigCompat.version} · $ACTION arayüz listesi · " +
+                            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date()) + "\n\n" +
+                            lines.joinToString("\n") { "${it.label}: ${it.value}" } + "\n")
+                }
+                listing = false
+                main.post(done)
+            }
+        }
+        conn = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                // The only call on the binder: its interface name, off the main thread (a hung
+                // vendor service must not freeze the screen). Nothing of the interface itself.
+                kotlin.concurrent.thread(name = "kesif-aidl-ad") {
+                    val d = runCatching { service?.interfaceDescriptor }.getOrNull()
+                    main.post { next(d, "servisten okundu (bağlantı hemen kapatıldı)") }
+                }
+            }
+            override fun onServiceDisconnected(name: ComponentName?) {}
+        }
+        bound = runCatching { app.bindService(intent(), conn, 0) }.getOrDefault(false)
+        if (!bound) { runCatching { app.unbindService(conn) }; next(null, "servise bağlanılamadı; yalnız APK'dan listelendi"); return }
+        main.postDelayed({ next(null, "${WAIT_MS} ms içinde bağlantı gelmedi; yalnız APK'dan listelendi") }, WAIT_MS)
+    }
+
     fun section(): Section? = app?.let { section(it) }
 
     fun section(ctx: Context): Section = Section(
         "Servis erişilebilirliği · $ACTION",
-        staticInfo(ctx) + (lastResult ?: listOf(Line("Bağlanma testi", "henüz denenmedi (canlı ekrandaki düğmeyle yapılır)"))),
+        staticInfo(ctx) + (lastResult ?: listOf(Line("Bağlanma testi", "henüz denenmedi (canlı ekrandaki düğmeyle yapılır)"))) +
+            (interfaceLines ?: listOf(Line("Arayüz listesi", "henüz alınmadı (canlı ekrandaki düğmeyle)"))) +
+            listOfNotNull(AirCommand.lastResult?.let { Line("Klima +0,5° denemesi", it) }),
     )
 }

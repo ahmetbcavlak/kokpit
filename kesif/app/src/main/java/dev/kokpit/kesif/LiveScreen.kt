@@ -99,6 +99,12 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
     private val winStatus = label("", 14f, Palette.text)
     private val svcResult = label("Henüz denenmedi", 13f, Palette.text, mono = true)
     private val svcButton = button("CanService bağlanma testi", primary = false) { serviceTest() }
+    private val closeResult = label("Henüz denenmedi", 13f, Palette.text, mono = true)
+    private val closeButton = button("Kapı penceresini kapatmayı dene", primary = false) { closeTest() }
+    private val aidlResult = label("Henüz alınmadı", 12f, Palette.text, mono = true)
+    private val aidlButton = button("CanService arayüzünü listele", primary = false) { listInterface() }
+    private val airResult = label("Önce arayüzü listele; uygun tek bir metot bulunursa düğme açılır.", 13f, Palette.text, mono = true)
+    private val airButton = button("Klima +0,5° dene", primary = false) { airTest() }
     private var qrFor: String? = null
 
     init { build() }
@@ -198,10 +204,21 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
                 runCatching { a.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                     .onFailure { Toast.makeText(a, "Ayarlar açılamadı", Toast.LENGTH_SHORT).show() }
             }, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)))
+            addView(label("Kapatma testi", 17f, Palette.accent, bold = true).apply { setPadding(0, dp(16), 0, 0) })
+            addView(label("Tek deneme, yalnız kapı uyarısında (klima penceresine asla): kapatma düğmesine tıklar; bulamazsa geri tuşu, o da yalnız uyarı odaktaysa. Uyarı yoksa ${CloseTest.ARM_MS / 1000} sn bekler: bu sürede bir kapıyı aç. Kapanma süresi pencere-olaylari.csv’ye, bileşen dökümü arayuz-dokumu.csv’ye yazılır.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
+            addView(closeResult.apply { setPadding(0, 0, 0, dp(8)) })
+            addView(closeButton, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)))
             addView(label("CanService erişilebilirliği", 17f, Palette.accent, bold = true).apply { setPadding(0, dp(16), 0, 0) })
             addView(label("Tek bir bindService() denemesi: bağlantı gelirse hemen kapatılır, hiçbir metot çağrılmaz; servis çalışmıyorsa başlatılmaz. Servis çalışıyorsa üreticinin bağlanma ve ayrılma kodu bir kez çalışır.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
             addView(svcResult.apply { setPadding(0, 0, 0, dp(8)) })
             addView(svcButton, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)))
+            addView(label("Arayüz listesi: servise bir kez bağlanıp yalnız arayüz adını sorar (üreticinin bağlanma/ayrılma kodu bir kez çalışır), metotları APK’dan okur. Arayüzün hiçbir metodu çağrılmaz, araca komut gitmez.", 13f, Palette.faint).apply { setPadding(0, dp(12), 0, dp(6)) })
+            addView(aidlResult.apply { setPadding(0, 0, 0, dp(8)) })
+            addView(aidlButton, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)))
+            addView(label("Klima +0,5° (K-69)", 17f, Palette.accent, bold = true).apply { setPadding(0, dp(16), 0, 0) })
+            addView(label("Araca giden tek komut. Listeden çıkan metodu gösterir, onaylarsan bir kez çağırır ve ACTION_AIR_INFO’da yeni sıcaklığı bekler. Servis başka bir arayüz bildirirse hiçbir şey göndermez.", 13f, Palette.faint).apply { setPadding(0, dp(4), 0, dp(6)) })
+            addView(airResult.apply { setPadding(0, 0, 0, dp(8)) })
+            addView(airButton, LinearLayout.LayoutParams(MATCH_PARENT, dp(56)))
             content.addView(this, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) })
         }
 
@@ -240,6 +257,41 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
                     .joinToString("\n") { "${it.label}: ${it.value}" }
             }
         }
+    }
+
+    private fun closeTest() {
+        closeResult.text = CloseTest.request()
+    }
+
+    private fun listInterface() {
+        aidlResult.text = "Listeleniyor…"
+        ServiceProbe.listInterface(a) {
+            airResult.text = "Aday: " + AirCommand.candidateText()
+            val lines = ServiceProbe.interfaceLines.orEmpty()
+            aidlResult.text = lines.take(24).joinToString("\n") { "${it.label}: ${it.value}".take(110) } +
+                if (lines.size > 24) "\n… tamamı raporda ve servis-arayuzu.txt’de" else ""
+        }
+    }
+
+    private var airDialogOpen = false
+
+    private fun airTest() {
+        val c = AirCommand.candidate
+        if (c == null || !AirCommand.ready) { airResult.text = AirCommand.candidateText(); return }
+        if (airDialogOpen) return // one confirmation at a time
+        airDialogOpen = true
+        // The method shown here is the one sent; if the listing changes meanwhile, nothing is sent.
+        android.app.AlertDialog.Builder(a)
+            .setTitle("Klima +0,5° dene")
+            .setMessage(AirCommand.confirmText(c))
+            .setNegativeButton("Vazgeç", null)
+            .setPositiveButton("Gönder") { _, _ ->
+                airResult.text = "Gönderiliyor…"
+                if (!AirCommand.send(a, c) { airResult.text = AirCommand.lastResult ?: "" })
+                    airResult.text = AirCommand.lastResult ?: "Deneme sürüyor"
+            }
+            .setOnDismissListener { airDialogOpen = false }
+            .show()
     }
 
     private fun exportPackages() {
@@ -342,6 +394,11 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
         val ws = WindowLog.statusText(a)
         if (winStatus.text.toString() != ws) winStatus.text = ws
         svcButton.isEnabled = !ServiceProbe.running
+        aidlButton.isEnabled = !ServiceProbe.listing
+        airButton.isEnabled = AirCommand.ready
+        airButton.alpha = if (AirCommand.ready) 1f else 0.5f
+        closeButton.isEnabled = !CloseTest.busy
+        CloseTest.lastResult?.let { if (closeResult.text.toString() != it) closeResult.text = it }
 
         val ps = PackageExporter.statusText()
         if (pkgStatus.text.toString() != ps) pkgStatus.text = ps
