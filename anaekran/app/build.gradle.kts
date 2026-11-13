@@ -13,8 +13,8 @@ android {
         applicationId = "dev.kokpit.anaekran"
         minSdk = 27
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
     }
 
     // Release key comes from the environment (same as kesif/). Never commit a keystore or password.

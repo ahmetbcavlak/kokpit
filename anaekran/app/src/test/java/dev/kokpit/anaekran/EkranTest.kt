@@ -1,6 +1,7 @@
 package dev.kokpit.anaekran
 
 import android.Manifest
+import android.content.Intent
 import android.provider.Settings
 import android.view.View
 import android.view.WindowManager
@@ -20,6 +21,8 @@ import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.Tema
 import dev.kokpit.anaekran.veri.AracVerisi
 import dev.kokpit.anaekran.veri.HareketHali
+import dev.kokpit.anaekran.veri.KlimaCozucu
+import dev.kokpit.anaekran.veri.KlimaKaynagi
 import dev.kokpit.anaekran.veri.SahteVeri
 import dev.kokpit.anaekran.veri.VeriBaglayici
 import org.junit.After
@@ -278,6 +281,32 @@ class EkranTest {
         assertTrue(shadowOf(app).broadcastIntents.isEmpty())
         assertNull(shadowOf(app).nextStartedService)
         assertNull(shadowOf(app).nextStartedActivity)
+    }
+
+    @Test
+    fun klimaMetinSicaklikGorunur() {
+        c = TestYardim.acVeGec()
+        fun gonder(deger: String) {
+            KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_KLIMA).putExtra(KlimaCozucu.SOL_SICAKLIK, deger))
+            TestYardim.bosalt()
+        }
+        val alt = a.katmanlar.altCubuk
+        gonder("23.0℃")
+        assertTrue(TestYardim.gorunurMetinler(alt).contains("23°"))
+        assertTrue(metinler(Ekran.PARK).contains("23°"))
+        alt.klimaAlani.performClick()
+        val panel = e.gorunum(Ekran.KLIMA) as KlimaPaneli
+        assertEquals("23°", panel.buyukMetin.text.toString())
+
+        gonder("21.5℃")
+        assertEquals("21,5°", panel.buyukMetin.text.toString())
+        assertTrue(TestYardim.gorunurMetinler(alt).contains("21,5°"))
+
+        // Engine off: "0.0℃" is unknown, shown as a dash.
+        gonder("0.0℃")
+        assertEquals("—", panel.buyukMetin.text.toString())
+        assertFalse(TestYardim.gorunurMetinler(alt).contains("0°"))
+        assertTrue(alt.klimaAlani.contentDescription.endsWith(" —"))
     }
 
     @Test

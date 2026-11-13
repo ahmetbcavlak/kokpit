@@ -83,6 +83,67 @@ class KlimaTest {
     }
 
     @Test
+    fun metinSicaklik_aractaGorulenBicim() {
+        // 13 Nov on the car: text with a dot decimal and U+2103.
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik("23.0\u2103"))
+        assertEquals(Sicaklik.Derece(21.5), KlimaCozucu.sicaklik("21.5℃"))
+        assertEquals(Sicaklik.Low, KlimaCozucu.sicaklik("LOW"))
+        assertEquals(Sicaklik.Hi, KlimaCozucu.sicaklik("HI"))
+        // Engine off: "0.0℃" is not a set temperature.
+        assertNull(KlimaCozucu.sicaklik("0.0℃"))
+        assertNull(KlimaCozucu.sicaklik(0.0))
+        // Other degree suffixes and spacing.
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik("23.0 °C"))
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik("23.0°"))
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik(" 23.0 ℃ "))
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik("23,0℃"))
+        // Number extras of every type.
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik(23))
+        assertEquals(Sicaklik.Derece(23.5), KlimaCozucu.sicaklik(23.5f))
+        assertEquals(Sicaklik.Derece(23.5), KlimaCozucu.sicaklik(23.5))
+        // Unreadable or out of range: unknown.
+        assertNull(KlimaCozucu.sicaklik(""))
+        assertNull(KlimaCozucu.sicaklik("℃"))
+        assertNull(KlimaCozucu.sicaklik("abc"))
+        assertNull(KlimaCozucu.sicaklik("abc℃"))
+        assertNull(KlimaCozucu.sicaklik("99.0℃"))
+        assertNull(KlimaCozucu.sicaklik("9.5℃"))
+        assertNull(KlimaCozucu.sicaklik(null))
+
+        // Through the receiver, as the car sends it.
+        KlimaKaynagi.isle(hava(KlimaCozucu.SOL_SICAKLIK to "23.0℃"))
+        bosalt()
+        assertEquals(Sicaklik.Derece(23.0), AracVerisi.durum.klima?.sicaklik)
+        KlimaKaynagi.isle(hava(KlimaCozucu.SOL_SICAKLIK to "0.0℃"))
+        bosalt()
+        assertNull(AracVerisi.durum.klima?.sicaklik)
+        assertEquals("KEY_VALUE_LEFT_TEMP=0.0℃", Teshis.klimaHam) // raw value still in diagnostics
+    }
+
+    @Test
+    fun disSicaklikMetin() {
+        assertEquals(14.0, KlimaCozucu.disSicaklik("14.0℃")!!, 0.0)
+        // 0 is a real outside temperature (unlike the set temperature).
+        assertEquals(0.0, KlimaCozucu.disSicaklik("0.0℃")!!, 0.0)
+        assertEquals(0.0, KlimaCozucu.disSicaklik(0)!!, 0.0)
+        assertEquals(-3.5, KlimaCozucu.disSicaklik("-3.5℃")!!, 0.0)
+        assertEquals(-3.5, KlimaCozucu.disSicaklik("-3.5 °C")!!, 0.0)
+        assertNull(KlimaCozucu.disSicaklik("abc"))
+        assertNull(KlimaCozucu.disSicaklik("99.0℃"))
+
+        KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_DIS_SICAKLIK).putExtra("hcn.air.outdoor_temp", "0.0℃"))
+        bosalt()
+        assertEquals(0.0, AracVerisi.durum.disSicaklik!!, 0.0)
+        KlimaKaynagi.isle(hava("hcn.air.outdoor_temp" to "-3.5℃"))
+        bosalt()
+        assertEquals(-3.5, AracVerisi.durum.disSicaklik!!, 0.0)
+        // K-74 unchanged: an unknown key with the same format is not read.
+        KlimaKaynagi.isle(Intent(KlimaCozucu.EYLEM_DIS_SICAKLIK).putExtra("temp", "14.0℃"))
+        bosalt()
+        assertEquals(-3.5, AracVerisi.durum.disSicaklik!!, 0.0)
+    }
+
+    @Test
     fun eksikAnahtarBilinmiyor() {
         val k = KlimaCozucu.klima(paket(KlimaCozucu.SOL_SICAKLIK to 22))!!
         assertEquals(Sicaklik.Derece(22.0), k.sicaklik)

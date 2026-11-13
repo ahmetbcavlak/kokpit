@@ -11,9 +11,10 @@ import java.util.Locale
  *  - Actions ACTION_AIR_INFO, hcn.air.outdoor_temp, ACTION_OUTDOOR_TEMP_DATA: the ones Kokpit Keşif
  *    (LiveProbe) listens to; climate over ACTION_AIR_INFO was seen on the car on 12 Nov.
  *  - Extras KEY_VALUE_LEFT_TEMP, _RIGHT_TEMP, _WIND_LEVEL, _ACFLAG, _BIGAUTOFLAG: Keşif's climate card
- *    (LiveProbe.kt), the source of the 12 Nov result. Their value encoding (plain degrees? a code for
- *    LOW/HI? 0/1 flags? fan 0–8 as raw numbers?) is NOT recorded anywhere, so only unambiguous values
- *    are accepted and everything else stays null.
+ *    (LiveProbe.kt), the source of the 12 Nov result. Temperature encoding seen on the car (13 Nov,
+ *    0.1 test; design pack 0.2 BENIOKU §4): TEXT, "LOW", "HI" or degrees with a dot decimal and the
+ *    U+2103 sign ("23.0℃"); "0.0℃" while the engine is off. The other values' encoding (0/1 flags?
+ *    fan 0–8 as raw numbers?) is not recorded, so only unambiguous values are accepted, the rest is null.
  *  - Air direction, demist: present on the unit (12 Nov) but no confirmed extra name, so [Klima.havaYonu]
  *    and [Klima.buzCozme] are never filled in 0.1.
  *  - Single zone: [Klima.sicaklik] is LEFT_TEMP only. RIGHT_TEMP is kept in the raw diagnostics: the unit
@@ -53,7 +54,8 @@ object KlimaCozucu {
 
     /**
      * Plausible set temperatures in °C. Kept wide on purpose: the unit's real range and step are not
-     * confirmed; a value outside (e.g. a coded LOW/HI or a half-degree count) stays null and visible in [Teshis].
+     * confirmed (about 15–32 is usual); a value outside (e.g. a coded LOW/HI or a half-degree count)
+     * stays null and visible in [Teshis].
      */
     private val AYAR_ARALIGI = 10.0..35.0
     private val DIS_ARALIGI = -45.0..65.0
@@ -95,6 +97,10 @@ object KlimaCozucu {
 
     // --- single values ---
 
+    /**
+     * Set temperature: "LOW"/"HI" (and LO/HIGH), or degrees as text ("23.0℃", "23.0 °C", "23.0°", "23.0")
+     * or as a number. 0 ("0.0℃", engine off) and values outside [AYAR_ARALIGI] are unknown (null).
+     */
     fun sicaklik(v: Any?): Sicaklik? {
         if (v is String) {
             when (v.trim().uppercase(Locale.ROOT)) {
@@ -102,7 +108,8 @@ object KlimaCozucu {
                 "HI", "HIGH" -> return Sicaklik.Hi
             }
         }
-        val d = sayi(v) ?: return null
+        val d = derece(v) ?: return null
+        if (d == 0.0) return null // "0.0℃": engine off, not a set temperature
         return if (d in AYAR_ARALIGI) Sicaklik.Derece(d) else null
     }
 
@@ -124,11 +131,23 @@ object KlimaCozucu {
         }
     }
 
+    /** Outside temperature, number or text with the same degree suffixes; 0 is a real value here. */
     fun disSicaklik(v: Any?): Double? {
-        val d = sayi(v) ?: return null
+        val d = derece(v) ?: return null
         return if (d in DIS_ARALIGI) d else null
     }
 
+    /** A trailing degree sign: "℃" (U+2103), "°C", "°", with any spaces around it. */
+    private val DERECE_EKI = Regex("\\s*(\u2103|°\\s*[Cc]?)\\s*$")
+
+    /** [sayi] for temperatures: a text value may end in a degree sign ([DERECE_EKI]). */
+    private fun derece(v: Any?): Double? = if (v is String) sayi(v.trim().replace(DERECE_EKI, "")) else sayi(v)
+
+    /**
+     * Int, Long, Float, Double or text. Text is parsed with a dot decimal, independent of the Locale
+     * (toDoubleOrNull); a comma is also taken as the decimal mark ("23,0"), as no unit would use it
+     * as a thousands separator for these small numbers.
+     */
     private fun sayi(v: Any?): Double? = when (v) {
         is Number -> v.toDouble().takeIf { !it.isNaN() && !it.isInfinite() }
         is String -> v.trim().replace(',', '.').toDoubleOrNull()?.takeIf { !it.isNaN() && !it.isInfinite() }
