@@ -29,9 +29,9 @@ import kotlin.math.roundToInt
 /**
  * Drive screen, Y-3 (night) / Y-11 (day): the HUD only — the GPS speed in big Barlow Condensed
  * 200 with the 0–180 arc above it, "km/sa · gps", the climate HUD on the left, the ruler. The
- * car is not here: at night the drive scene (its own root layer, under this screen) draws the
- * moving car, the lane lines and the speed lines; by day the scene picture has the still car
- * and this screen keeps 0.1's static speed lines. HUD fixed, the world moves (K-94).
+ * car is not here: the drive scene (its own root layer, under this screen) draws the moving
+ * car, the lane lines and the speed lines, at night and by day (K-108). HUD fixed, the world
+ * moves (K-94).
  * Not drawn: "bu yolculuk" (no trip source), the CarPlay/Haritalar row, the media card (K-74);
  * no door/boot HUD (not in Y-3 — the warning layer handles open doors).
  *
@@ -93,9 +93,8 @@ class SurusEkrani(context: Context, private val konumIzni: () -> Boolean) : Ekra
 
     private fun ciz(c: Canvas) {
         val p = palet
-        // Night: the drive scene draws the speed lines itself (opacity by speed); drawing them
-        // here too would double them (HareketBaglayici step 12). By day there is no scene.
-        if (p.gunduz) Cizgiler.hizCizgileri(c, p)
+        // No speed lines here: the drive scene draws them (opacity by speed), by day too since
+        // 0.2.1 — drawing them here as well would double them (HareketBaglayici step 12).
         Cizgiler.hizYayiTaban(c, p)
         // Night ruler under the car, between it and the near lane line (0.2 demo Y-3h, y 646.8);
         // by day 0.1's Y-11 place (602).

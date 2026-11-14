@@ -40,19 +40,25 @@ class SurusOnizlemeTest {
     }
 
     @Test
-    fun onizlemeler() {
+    fun onizlemeler() = onizle(gunduz = false, on = "")
+
+    /** 0.2.1 (K-108): the day set over boya_gunduz; compare with tasarim-0.3 referans/hareket-gunduz.png. */
+    @Test
+    fun gunduzOnizlemeler() = onizle(gunduz = true, on = "gunduz-")
+
+    private fun onizle(gunduz: Boolean, on: String) {
         val a = Robolectric.buildActivity(Activity::class.java).setup().get()
         val kaynak = Kaynak()
         var hiz = 0f
         val kok = FrameLayout(a)
         val arka = ImageView(a).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setImageResource(R.drawable.boya_gece)
+            setImageResource(if (gunduz) R.drawable.boya_gunduz else R.drawable.boya_gece)
         }
         val s = SurusSahnesi(a, kaynak) { 0L }
         s.hizSaglayici = HizSaglayici { hiz }
         s.durgunSaglayici = DurgunSaglayici { hiz == 0f }
-        s.varliklariKur(SurusVarliklari.coz(a.resources))
+        s.varliklariKur(SurusVarliklari.coz(a.resources, gunduz))
         kok.addView(arka, FrameLayout.LayoutParams(768, 1024))
         kok.addView(s, FrameLayout.LayoutParams(768, 1024))
         a.setContentView(kok)
@@ -80,18 +86,19 @@ class SurusOnizlemeTest {
         }
 
         ilerle(0.1)
-        cek("hiz-0")
+        cek("${on}hiz-0")
         hiz = 50f / 3.6f
         ilerle(4.0)
         // a moment without the lamp band, then one with the band mid-body
         while (!s.model.lambaKonumu.isNaN()) ilerle(1.0 / 60)
-        cek("hiz-50")
+        cek("${on}hiz-50")
         while (s.model.lambaKonumu.isNaN() || s.model.lambaKonumu < 0.3f) ilerle(1.0 / 60)
-        cek("hiz-50-lamba")
+        // by day the band is off: this frame must look like any other
+        cek("${on}hiz-50-lamba")
         hiz = 130f / 3.6f
         ilerle(5.0)
         while (!s.model.lambaKonumu.isNaN()) ilerle(1.0 / 60)
-        cek("hiz-130")
-        assertTrue(File(cikti, "hiz-130.png").length() > 10_000)
+        cek("${on}hiz-130")
+        assertTrue(File(cikti, "${on}hiz-130.png").length() > 10_000)
     }
 }

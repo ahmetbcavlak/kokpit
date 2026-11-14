@@ -33,7 +33,8 @@ import java.io.File
 /**
  * Renders the head unit's 768×1024 screen (mdpi = 1 design px per pixel, Android 8.1) with
  * fake data and writes PNG previews to app/build/onizleme/. The PNGs are for eyes, not asserts:
- * compare them with the design package's referans/Y-*.png (0.2 drive: tasarim-0.2 referans/hiz-*.png).
+ * compare them with the design package's referans/Y-*.png (0.2 drive: tasarim-0.2 referans/hiz-*.png;
+ * 0.2.1 day drive: tasarim-0.3 referans/hareket-gunduz.png).
  * Drive previews feed the smoothed speed (Hiz.yumusatici) and step the drive scene's frames
  * (TestYardim.kare), so the HUD and the moving car show what the unit draws at that speed.
  */
@@ -223,6 +224,27 @@ class OnizlemeTest {
         sur(62f, 3.0)
         cek(a, "22-surus-62-gunduz")
         c.pause().stop().destroy()
+
+        // 0.2.1 (K-108): the day drive scene at 0, 50, 130 km/h (compare with tasarim-0.3
+        // referans/hareket-gunduz.png: same car, same place; no lamp band, no city lights).
+        Tema.zorla(Palet.GUNDUZ)
+        AracVerisi.sifirla()
+        Hiz.yumusatici.sifirla()
+        SahteVeri.uygula(SahteVeri.parkGece())
+        val g = TestYardim.acVeGec()
+        val ga = g.get()
+        Hiz.yumusatici.ornek(0f, TestYardim.simdiNs(), null)
+        AracVerisi.guncelle { hareketHali(HareketHali.SURUS) }
+        TestYardim.gecisleriBitir()
+        assertTrue(ga.surusGorunur)
+        assertEquals(true, ga.surusSahnesi!!.kuruluGunduz)
+        sur(0f, 1.5)
+        cek(ga, "23-surus-0-gunduz")
+        sur(50f, 5.0)
+        cek(ga, "24-surus-50-gunduz")
+        sur(130f, 6.0)
+        cek(ga, "25-surus-130-gunduz")
+        g.pause().stop().destroy()
     }
 
     private fun cek(a: MainActivity, ad: String) {

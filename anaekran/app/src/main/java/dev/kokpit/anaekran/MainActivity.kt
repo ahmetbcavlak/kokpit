@@ -81,13 +81,16 @@ import dev.kokpit.anaekran.veri.VeriBaglayici
  *    when the car stops with a panel open, the panel stays and closing it lands on park;
  *  - door/boot: the warning layer (UyariKatmani) above whatever screen is in front.
  *
- * Drive scene (0.2, K-94/K-95; [surusKatmaniniGuncelle]): its own root layer between the scene
- * picture and the video. Shown only at night, with the drive screen in front, once its bitmaps
- * are ready, while no clip/fade of the scene picture runs and the diagnostics panel is closed;
- * then the scene picture under it is boya_gece (the scene draws the car). Park → drive: hidden
- * while klip_surus plays; in the clip's `bitti` it appears over the still car (sahne_surus) from
- * rest (`durgundanBasla`) and the picture under it switches to boya_gece. Drive → park, a panel,
- * day: hidden before the clip/fade starts, whose cover is the still car again.
+ * Drive scene (0.2, K-94/K-95; by day too since 0.2.1, K-108; [surusKatmaniniGuncelle]): its own
+ * root layer between the scene picture and the video. Shown with the drive screen in front, once
+ * the bitmaps of the theme's set (night / day, the scene picture's rule) are ready, while no
+ * clip/fade of the scene picture runs and the diagnostics panel is closed; then the scene picture
+ * under it is the bare ground, boya_gece / boya_gunduz (the scene draws the car). Park → drive:
+ * hidden while klip_surus (night) or the plain fade (day, no day clip) runs; in its `bitti` it
+ * appears over the still car (sahne_surus / sahne_surus_gunduz) from rest (`durgundanBasla`) and
+ * the picture under it switches to the ground. Drive → park, a panel, dawn / dusk: hidden before
+ * the clip/fade starts, whose cover is the still car of the set on screen; at dawn / dusk the fade
+ * ends on the other theme's still car and the scene comes back with the other set, from rest.
  *
  * Speed digits and arc (K-96): one reader of the smoothed speed per frame — the drive scene's
  * frame while it runs (HareketBaglayici.surusKaresi), otherwise the drive screen's own loop
@@ -136,9 +139,12 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     var surusSahnesi: SurusSahnesi? = null
         private set
 
-    /** The drive scene is VISIBLE (and the scene picture under it is boya_gece). */
+    /** The drive scene is VISIBLE (and the scene picture under it is the bare ground). */
     var surusGorunur = false
         private set
+
+    /** The set the visible drive scene shows (its day/night, fixed while it is visible). */
+    private var surusGunduz = false
 
     /** A clip / fade of the scene picture runs (started by [sahneGecisi], until its `bitti`). */
     private var sahneGecisiSuruyor = false
@@ -393,16 +399,18 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
      * picture on screen and ends on [yeni] (e.g. not from the boot-open picture), otherwise a
      * plain 0.6 s fade (K-93, HareketBaglayici). The scene layer switches at once (the motion
      * layer covers it with the old picture) and again in `bitti` (wiring step 5); KESILDI starts
-     * nothing. A visible drive scene is hidden first and the cover is the still car
-     * (sahne_surus): the clip back to park starts on it, and so does any fade away from it.
+     * nothing. A visible drive scene is hidden first and the cover is the still car of its set
+     * ([ortuResmi]: sahne_surus / sahne_surus_gunduz): the clip back to park starts on it, and so
+     * does any fade away from it (dawn / dusk included).
      *
-     * The cover must be on screen in the same turn the scene is hidden (İ-F2 Ö-2): if sahne_surus
+     * The cover must be on screen in the same turn the scene is hidden (İ-F2 Ö-2): if the still car
      * is not decoded (memory trimmed), the moving car stays until it is, then the change runs.
      * Should the decode not call back, it retries every [ORTU_BEKLEME_MS] until the cover is
      * decoded (the car rule holds: the scene is never hidden without a cover).
      */
     private fun sahneGecisi(yeni: Int, klip: Klip?) {
-        if (surusGorunur && !Gorseller.hazirMi(R.drawable.sahne_surus)) {
+        val ortu = ortuResmi()
+        if (surusGorunur && !Gorseller.hazirMi(ortu)) {
             val no = ++sahneGecisNo
             sahneGecisiSuruyor = true
             ortuBekleniyor = true
@@ -414,7 +422,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
                 sahneGecisi(yeni, klip)
                 surusKatmaniniGuncelle()
             }
-            Gorseller.al(resources, R.drawable.sahne_surus) { devamEt.run() }
+            Gorseller.al(resources, ortu) { devamEt.run() }
             ana.postDelayed(devamEt, ORTU_BEKLEME_MS)
             return
         }
@@ -422,7 +430,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         var eski = sahne.istenen
         if (surusGorunur) {
             surusGizle()
-            eski = R.drawable.sahne_surus
+            eski = ortu
         }
         if (yeni == eski) {
             sahne.goster(yeni)
@@ -433,8 +441,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             val k = klip?.takeIf { (it.poster as? Goruntu.Kaynak)?.id == eski && it.sonKare == yeni }
             val no = ++sahneGecisNo
             sahneGecisiSuruyor = true
-            // The drive scene will need boya_gece under it at the end: decode it while the clip plays.
+            // The drive scene will need the bare ground under it at the end: decode it while the clip / fade runs.
             if (yeni == R.drawable.sahne_surus) Gorseller.al(resources, R.drawable.boya_gece) {}
+            if (yeni == R.drawable.sahne_surus_gunduz) Gorseller.al(resources, R.drawable.boya_gunduz) {}
             h.gecisOynat(k, eski, yeni) { s ->
                 if (s != KlipOynatici.Sonuc.KESILDI) sahne.goster(yeni)
                 if (no == sahneGecisNo) {
@@ -447,37 +456,55 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     /**
-     * What the scene layer should show for [e] now: boya_gece under a visible drive scene at
-     * night. At dawn (palette already day, scene still visible) the day car, so [sahneyiGuncelle]
-     * starts the fade whose cover is the still night car (İ-F2 Ö-1).
+     * What the scene layer should show for [e] now: the bare ground under a visible drive scene
+     * whose set matches the theme. At dawn / dusk (palette changed, scene still visible with the
+     * other set) the other theme's still car, so [sahneyiGuncelle] starts the fade whose cover is
+     * the still car of the set on screen (İ-F2 Ö-1, now both ways).
      */
     private fun istenenSahne(e: Ekran): Int =
-        if (e == Ekran.SURUS && surusGorunur && !Tema.palet.gunduz) R.drawable.boya_gece else sahneKaynagi(e)
+        if (e == Ekran.SURUS && surusGorunur && surusGunduz == Tema.palet.gunduz) zemin(surusGunduz) else sahneKaynagi(e)
+
+    /** The bare ground under the drive scene (no car: the scene draws it). */
+    private fun zemin(gunduz: Boolean): Int = if (gunduz) R.drawable.boya_gunduz else R.drawable.boya_gece
+
+    /** The still car of the visible drive scene's set: the cover whenever the scene goes. */
+    private fun ortuResmi(): Int = if (surusGunduz) R.drawable.sahne_surus_gunduz else R.drawable.sahne_surus
 
     /**
      * Shows or hides the drive scene by the rules in the class notes. Shown over the still car,
      * it starts from rest (its first frame equals the picture) and the picture under it becomes
-     * boya_gece in the same turn. Rule kept everywhere: scene hidden ⇒ the picture has the car.
-     * Leaving the drive screen and dusk hide it in [sahneGecisi] (the cover is the still car);
-     * what is left for here is the diagnostics panel, behind which the still car comes back.
-     * Re-checks the speed loop.
+     * the bare ground in the same turn. Rule kept everywhere: scene hidden ⇒ the picture has the
+     * car. Leaving the drive screen, dawn and dusk hide it in [sahneGecisi] (the cover is the
+     * still car); what is left for here is the diagnostics panel, behind which the still car
+     * comes back. The set is the theme's (HareketBaglayici asks for it on every theme change);
+     * the scene waits, hidden over the still car, until that set is decoded. Re-checks the speed loop.
      */
     private fun surusKatmaniniGuncelle() {
         val s = surusSahnesi
         if (s != null) {
-            val goster = !Tema.palet.gunduz && !acilisSuruyor && !sahneGecisiSuruyor &&
-                ekranlar.gecerli == Ekran.SURUS && s.hazir && !teshis.acik
+            val gunduz = Tema.palet.gunduz
+            val goster = !acilisSuruyor && !sahneGecisiSuruyor && ekranlar.gecerli == Ekran.SURUS &&
+                s.hazir && s.gunduz == gunduz && !teshis.acik
             if (goster && !surusGorunur) {
                 surusGorunur = true
+                surusGunduz = gunduz
                 s.visibility = View.VISIBLE
-                if (sahne.istenen != R.drawable.boya_gece) s.durgundanBasla()
-                sahne.goster(R.drawable.boya_gece)
+                val zemin = zemin(gunduz)
+                if (sahne.istenen != zemin) s.durgundanBasla()
+                sahne.goster(zemin)
                 // The still car is the cover when the scene goes: keep it decoded (Ö-2).
-                Gorseller.al(resources, R.drawable.sahne_surus) {}
+                Gorseller.al(resources, ortuResmi()) {}
             } else if (!goster && surusGorunur && !ortuBekleniyor) {
-                surusGizle()
-                if (ekranlar.gecerli == Ekran.SURUS) sahne.goster(sahneKaynagi(Ekran.SURUS))
+                if (ekranlar.gecerli == Ekran.SURUS && surusGunduz != gunduz) {
+                    // Theme changed under a visible scene: never swap cars in one frame — fade over the cover.
+                    sahneyiGuncelle()
+                } else {
+                    surusGizle()
+                    if (ekranlar.gecerli == Ekran.SURUS) sahne.goster(sahneKaynagi(Ekran.SURUS))
+                }
             }
+            // The asked-for set may still be decoding (first start, theme change): come back when it is in.
+            if (!s.hazir && s.hazirOlunca == null) s.hazirOlunca = { surusKatmaniniGuncelle() }
         }
         hizDongusunuGuncelle()
     }
@@ -600,8 +627,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         not.temaUygula(palet)
         uyari.temaUygula(palet)
         ekranlar.temaDegisti(palet)
-        // Picture first: at dusk it hides the drive scene and fades to the day car; at dawn the
-        // fade to the night car runs before the scene may show.
+        // Picture first: at dawn / dusk it hides the drive scene over the still car of its set and
+        // fades to the other theme's still car; the scene comes back with the other set at the end.
         sahneyiGuncelle()
         surusKatmaniniGuncelle()
     }
@@ -699,7 +726,12 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         }
         val t = s.tempo
         val tempo = if (t.yariHiz) "yarı hız (her 2. kare)" else "tam hız"
-        return "Sürüş sahnesi: $durum · tempo $tempo · yarıya iniş ${t.yariyaInisSayisi} · " +
+        val set = when (s.kuruluGunduz) {
+            true -> "gündüz"
+            false -> "gece"
+            null -> "yok"
+        } + if (s.hazir) "" else " (istenen ${if (s.gunduz) "gündüz" else "gece"} çözülüyor)"
+        return "Sürüş sahnesi: $durum · set $set · tempo $tempo · yarıya iniş ${t.yariyaInisSayisi} · " +
             "ekran ${String.format(java.util.Locale.ROOT, "%.1f", hz)} Hz · son hız ${String.format(java.util.Locale.ROOT, "%.1f", s.sonHizMs * MS_KMH)} km/sa"
     }
 
@@ -740,7 +772,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         devam = true
         hizDongusunuGuncelle()
         // onTrimMemory may have emptied the cache while away: the cover must be ready (Ö-2).
-        if (surusGorunur) Gorseller.al(resources, R.drawable.sahne_surus) {}
+        if (surusGorunur) Gorseller.al(resources, ortuResmi()) {}
         // Settings may have changed while we were away (service switched on, permission given).
         ipuclariniYenile()
         ekranlar.veriDegisti(AracVerisi.durum)

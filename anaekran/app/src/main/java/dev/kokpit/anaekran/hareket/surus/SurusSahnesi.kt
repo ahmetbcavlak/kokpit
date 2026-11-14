@@ -13,14 +13,22 @@ import android.widget.ImageView
 import dev.kokpit.anaekran.arayuz.Olcek
 import dev.kokpit.anaekran.hareket.HareketIzci
 import dev.kokpit.anaekran.hareket.KareKaynagi
+import dev.kokpit.anaekran.tema.Palet
 import kotlin.math.floor
 
 /**
  * Drive scene "the car is going" (K-94, K-95; design pack 0.2 §2): wheels turning under the
  * body, lane lines and distant lights flowing, a lamp reflection sweeping the body, speed lines,
  * suspension and a camera that pulls back with speed. The HUD is NOT here (it stays in the
- * screen layer, fixed); the background picture neither (the scene layer under it: boya_gece).
- * Full screen, transparent, takes no touches and is invisible to accessibility.
+ * screen layer, fixed); the background picture neither (the scene layer under it: boya_gece,
+ * by day boya_gunduz). Full screen, transparent, takes no touches and is invisible to accessibility.
+ *
+ * Night or day (K-108, design pack 0.3 §2): one bitmap set at a time ([SurusVarliklari]); the
+ * caller asks for the set with [varliklariYukle] by the scene picture's day/night rule. By day
+ * the same layout and motion, but no city lights (no tile, nothing drawn), the lamp reflection
+ * at [SurusFormul.LAMBA_GUNDUZ_OPAKLIK] (off: its view GONE), and the lane / speed-line colours
+ * of the day palette ([Palet.serit], [Palet.iz]). A set that arrives while the scene is VISIBLE
+ * with the other set waits until the scene is hidden: the car never changes under the eye.
  *
  * Views, bottom to top (demo z order), all in design px inside a 768×1024 container scaled by
  * Olcek.oran (1 on the head unit):
@@ -101,14 +109,21 @@ class SurusSahnesi(
     /** 60/30 fps decision (diagnostics: [KareTemposu.yariHiz]). */
     val tempo = KareTemposu()
 
-    /**
-     * Bitmaps are in place. Until then the scene draws no car (only lines and lights): keep it
-     * INVISIBLE until [hazirOlunca] fires (decoding takes ≈ 50–100 ms after [varliklariYukle]).
-     */
-    var hazir = false
+    /** The set asked for last: day (true) or night. */
+    var gunduz = false
         private set
 
-    /** Called once when the bitmaps are in place; at once if they already are. */
+    /** The set on the views now (null: none yet). Differs from [gunduz] until the new set is in. */
+    val kuruluGunduz: Boolean? get() = kurulu?.gunduz
+
+    /**
+     * The bitmaps of the set asked for ([gunduz]) are in place. Until then the scene draws no car
+     * (or the other set's): keep it INVISIBLE until [hazirOlunca] fires (decoding takes
+     * ≈ 50–100 ms after [varliklariYukle]).
+     */
+    val hazir: Boolean get() = kurulu?.gunduz == gunduz
+
+    /** Called once when the asked-for set is in place; at once if it already is. */
     var hazirOlunca: (() -> Unit)? = null
         set(value) {
             field = value
@@ -141,7 +156,15 @@ class SurusSahnesi(
     private var izAcik = false
     private var sonNs = YOK
     private var birakildi = false
-    private var yukleniyor = false
+    private var kurulu: SurusVarliklari? = null
+
+    /** A decoded set waiting for the scene to be hidden (see the class notes). */
+    private var bekleyen: SurusVarliklari? = null
+    private var yukleniyorGece = false
+    private var yukleniyorGunduz = false
+
+    /** Lamp band multiplier for the set on the views (1 at night, day share by day). */
+    private var lambaCarpani = 1f
 
     /** Start ramp: speed multiplier 0 → 1 (smoothstep) over [rampaNs], from the first frame after [durgundanBasla]. */
     private var rampaNs = 0L
@@ -205,9 +228,25 @@ class SurusSahnesi(
         v.pivotY = SurusYerlesim.SPRITE_YARIM
     }
 
-    /** Puts the decoded bitmaps in; the scene shows the car from now on. */
+    /**
+     * Puts a decoded set in and makes it the asked-for one; the scene shows that car from now on.
+     * The other set's bitmaps are dropped (no reference kept here).
+     */
     fun varliklariKur(v: SurusVarliklari) {
         if (birakildi) return
+        gunduz = v.gunduz
+        bekleyen = null
+        kurulu = v
+        // The body view must have the bitmap's size: CENTER would shift a taller bitmap, and the
+        // lamp reflection's BitmapShader (CLAMP) would smear the last row into a taller view.
+        val h = v.govde.height
+        for (g in arrayOf<View>(govde, yansima)) {
+            val lp = g.layoutParams
+            if (lp.height != h) {
+                lp.height = h
+                g.layoutParams = lp
+            }
+        }
         govde.setImageBitmap(v.govde)
         govde.alpha = 1f
         for (i in 0..2) {
@@ -215,24 +254,73 @@ class SurusSahnesi(
             tekerArka[i].setImageBitmap(v.tekerArka[i])
         }
         arka.isik = v.isik
-        yansima.govdeAyarla(v.govde)
-        hazir = true
+        val p = if (v.gunduz) Palet.GUNDUZ else Palet.GECE
+        arka.uzak.renkAyarla(p.serit)
+        on.yakin.renkAyarla(p.serit)
+        iz.renkAyarla(p.iz)
+        lambaCarpani = if (v.gunduz) SurusFormul.LAMBA_GUNDUZ_OPAKLIK / SurusFormul.LAMBA_OPAKLIK else 1f
+        if (lambaCarpani > 0f) {
+            yansima.govdeAyarla(v.govde)
+            yansima.visibility = VISIBLE
+        } else {
+            // Off: no shader holds the body, the view is not drawn at all.
+            yansima.govdeBirak()
+            yansima.gorunurluk = 0f
+            yansima.visibility = GONE
+        }
         uygula()
         arka.invalidate()
+        on.invalidate()
         hazirOlunca?.let {
             hazirOlunca = null
             it()
         }
     }
 
-    /** Decodes the bitmaps on the worker thread and puts them in (idempotent). */
-    fun varliklariYukle() {
-        if (hazir || yukleniyor) return
-        yukleniyor = true
-        SurusVarliklari.yukle(resources) { v ->
-            yukleniyor = false
-            if (v != null) varliklariKur(v) else Log.w(SurusVarliklari.ETIKET, "sürüş varlıkları çözülemedi")
+    /**
+     * Asks for the night or [gunduz] set: decodes it on the worker thread and puts it in
+     * (idempotent; a set already in place or being decoded is not decoded again). While the
+     * scene is VISIBLE with the other set, the new one waits until the scene is hidden, so the
+     * caller hides it first (over a cover) and shows it again when [hazir].
+     */
+    fun varliklariYukle(gunduz: Boolean = false) {
+        if (birakildi) return
+        this.gunduz = gunduz
+        if (hazir) {
+            bekleyen = null
+            return
         }
+        bekleyen?.let {
+            if (it.gunduz == gunduz) {
+                kurBekleyen()
+                return
+            }
+            bekleyen = null
+        }
+        if (if (gunduz) yukleniyorGunduz else yukleniyorGece) return
+        if (gunduz) yukleniyorGunduz = true else yukleniyorGece = true
+        SurusVarliklari.yukle(resources, gunduz) { v ->
+            if (gunduz) yukleniyorGunduz = false else yukleniyorGece = false
+            when {
+                v == null -> Log.w(SurusVarliklari.ETIKET, "sürüş varlıkları çözülemedi (${if (gunduz) "gündüz" else "gece"})")
+                birakildi || v.gunduz != this.gunduz -> Unit // asked for the other set meanwhile: dropped
+                kurulu != null && visibility == VISIBLE -> bekleyen = v
+                else -> varliklariKur(v)
+            }
+        }
+    }
+
+    /** A waiting set goes in once the scene is hidden (posted: never inside the caller's hide). */
+    private fun kurBekleyen() {
+        val v = bekleyen ?: return
+        if (visibility == VISIBLE && kurulu != null) return
+        bekleyen = null
+        if (v.gunduz == gunduz) varliklariKur(v)
+    }
+
+    override fun setVisibility(visibility: Int) {
+        super.setVisibility(visibility)
+        if (visibility != VISIBLE && bekleyen != null) ana.post { kurBekleyen() }
     }
 
     // --- Life cycle ---
@@ -282,6 +370,8 @@ class SurusSahnesi(
         for (v in tekerOn + tekerArka) v.setImageDrawable(null)
         arka.isik = null
         yansima.govdeBirak()
+        kurulu = null
+        bekleyen = null
         hazirOlunca = null
     }
 
@@ -410,7 +500,7 @@ class SurusSahnesi(
 
         val onceki = yansima.ciziyor
         val lk = m.lambaKonumu
-        val lg = m.lambaGorunurlugu
+        val lg = m.lambaGorunurlugu * lambaCarpani
         val degisti = lk.toBits() != yansima.konum.toBits() || lg != yansima.gorunurluk
         yansima.konum = lk
         yansima.gorunurluk = lg
@@ -428,7 +518,7 @@ class SurusSahnesi(
             b < 2f -> { a0 = 0f; a1 = 1f; a2 = b - 1f }
             else -> { a0 = 0f; a1 = 0f; a2 = 1f }
         }
-        if (!hazir) {
+        if (kurulu == null) {
             for (x in v) x.alpha = 0f
             return
         }
@@ -480,6 +570,7 @@ class SurusSahnesi(
 
     /** Test / diagnostics view access. */
     internal val dunyaGorunumu: View get() = dunya
+    internal val govdeGorunumu: ImageView get() = govde
     internal val tekerOnGorunumleri: Array<ImageView> get() = tekerOn
     internal val tekerArkaGorunumleri: Array<ImageView> get() = tekerArka
     internal val yansimaGorunumu: YansimaKatmani get() = yansima

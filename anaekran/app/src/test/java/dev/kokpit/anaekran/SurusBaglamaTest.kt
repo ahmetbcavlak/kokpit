@@ -93,7 +93,7 @@ class SurusBaglamaTest {
 
         hal(HareketHali.SURUS)
         assertEquals(Ekran.SURUS, e.gecerli)
-        assertEquals(dev.kokpit.anaekran.R.raw.klip_surus, TestYardim.oynaticilar.last().klip)
+        assertEquals(R.raw.klip_surus, TestYardim.oynaticilar.last().klip)
         assertEquals(View.INVISIBLE, s.visibility) // the clip has its own car
         TestYardim.bekle(1000)
         assertEquals(View.INVISIBLE, s.visibility) // still in the clip's hold / fade
@@ -101,7 +101,7 @@ class SurusBaglamaTest {
         assertEquals(View.VISIBLE, s.visibility)
         assertTrue(a.surusGorunur)
         assertTrue(s.calisiyor)
-        assertEquals(dev.kokpit.anaekran.R.drawable.boya_gece, sahneResmi) // the scene draws the car
+        assertEquals(R.drawable.boya_gece, sahneResmi) // the scene draws the car
 
         // A panel: hidden at once; the panel's picture is the bare texture.
         a.katmanlar.altCubuk.klimaAlani.performClick()
@@ -115,53 +115,166 @@ class SurusBaglamaTest {
         assertEquals(View.INVISIBLE, s.visibility)
         TestYardim.gecisleriBitir()
         assertEquals(View.VISIBLE, s.visibility)
-        assertEquals(dev.kokpit.anaekran.R.drawable.boya_gece, sahneResmi)
+        assertEquals(R.drawable.boya_gece, sahneResmi)
 
         // Diagnostics: the scene stops behind the panel, the still car is back under it.
         a.katmanlar.kareHizi.performLongClick()
         assertTrue(a.teshis.acik)
         assertEquals(View.INVISIBLE, s.visibility)
         assertFalse(s.calisiyor)
-        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_surus, sahneResmi)
+        assertEquals(R.drawable.sahne_surus, sahneResmi)
         a.teshis.kapat()
         assertEquals(View.VISIBLE, s.visibility)
-        assertEquals(dev.kokpit.anaekran.R.drawable.boya_gece, sahneResmi)
+        assertEquals(R.drawable.boya_gece, sahneResmi)
 
         // Drive → park: hidden before the clip, which starts on the still car (its poster).
         val once = TestYardim.oynaticilar.size
         hal(HareketHali.PARK)
         assertEquals(View.INVISIBLE, s.visibility)
         assertEquals(once + 1, TestYardim.oynaticilar.size)
-        assertEquals(dev.kokpit.anaekran.R.raw.klip_surus_geri, TestYardim.oynaticilar.last().klip)
+        assertEquals(R.raw.klip_surus_geri, TestYardim.oynaticilar.last().klip)
         TestYardim.gecisleriBitir()
         assertEquals(View.INVISIBLE, s.visibility)
-        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_park, sahneResmi)
+        assertEquals(R.drawable.sahne_park, sahneResmi)
     }
 
     @Test
-    fun gunduzSahneYokAksamGeceGelir() {
+    fun gunduzSurusteHazirsaGunduzSahnesi() { // K-108
         Tema.zorla(Palet.GUNDUZ)
         c = TestYardim.acVeGec()
-        hal(HareketHali.SURUS)
-        TestYardim.gecisleriBitir()
-        assertEquals(Ekran.SURUS, e.gecerli)
-        assertEquals(View.INVISIBLE, s.visibility)
-        assertFalse(s.calisiyor)
-        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_surus_gunduz, sahneResmi)
+        assertEquals(true, s.kuruluGunduz) // the theme's set from the start
+        assertEquals(View.INVISIBLE, s.visibility) // park
 
-        // Dusk → night on the drive screen: the night car fades in, then the scene.
-        Tema.zorla(Palet.GECE)
+        // Park → drive by day: no clip, a plain fade over the still day car, then the scene.
+        val once = TestYardim.oynaticilar.size
+        hal(HareketHali.SURUS)
+        assertEquals(Ekran.SURUS, e.gecerli)
+        assertEquals(once, TestYardim.oynaticilar.size) // no player: there is no day clip
+        assertTrue(a.hareket!!.oynatici!!.calisiyor)
+        assertEquals(View.INVISIBLE, s.visibility)
+        assertEquals(R.drawable.sahne_surus_gunduz, sahneResmi)
+        TestYardim.gecisleriBitir()
+        assertEquals(View.VISIBLE, s.visibility)
+        assertTrue(a.surusGorunur)
+        assertTrue(s.calisiyor)
+        assertTrue(s.hazir)
+        assertEquals(true, s.kuruluGunduz)
+        assertEquals(R.drawable.boya_gunduz, sahneResmi) // the scene draws the day car
+        // Day look: no city lights, lamp reflection off.
+        assertEquals(null, (s.arkaGorunumu as dev.kokpit.anaekran.hareket.surus.ArkaKatman).isik)
+        assertEquals(View.GONE, s.yansimaGorunumu.visibility)
+
+        // Panel: hidden at once; back: the still day car, then the scene from rest.
+        a.katmanlar.altCubuk.klimaAlani.performClick()
+        assertEquals(View.INVISIBLE, s.visibility)
+        TestYardim.gecisleriBitir()
+        assertEquals(R.drawable.boya_gunduz, sahneResmi) // the panel's bare texture (day)
+        a.katmanlar.altCubuk.klimaAlani.performClick()
         assertEquals(View.INVISIBLE, s.visibility)
         TestYardim.gecisleriBitir()
         assertEquals(View.VISIBLE, s.visibility)
-        assertEquals(dev.kokpit.anaekran.R.drawable.boya_gece, sahneResmi)
 
-        // Dawn: hidden at once, the fade's cover is the still night car, it ends on the day car.
-        Tema.zorla(Palet.GUNDUZ)
+        // Diagnostics: the scene stops, the still day car is back under the panel.
+        a.katmanlar.kareHizi.performLongClick()
         assertEquals(View.INVISIBLE, s.visibility)
+        assertFalse(s.calisiyor)
+        assertEquals(R.drawable.sahne_surus_gunduz, sahneResmi)
+        a.teshis.kapat()
+        assertEquals(View.VISIBLE, s.visibility)
+        assertEquals(R.drawable.boya_gunduz, sahneResmi)
+
+        // Drive → park: hidden before the plain fade, whose cover is the still day car.
+        hal(HareketHali.PARK)
+        assertEquals(View.INVISIBLE, s.visibility)
+        assertEquals(once, TestYardim.oynaticilar.size)
+        assertTrue(aracVar())
         TestYardim.gecisleriBitir()
         assertEquals(View.INVISIBLE, s.visibility)
-        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_surus_gunduz, sahneResmi)
+        assertEquals(R.drawable.sahne_park_gunduz, sahneResmi)
+    }
+
+    @Test
+    fun geceGunduzGecisindeSetDegisirAracHerKarede() { // K-108: dawn and dusk while driving
+        geceSurusteSahne()
+        assertEquals(false, s.kuruluGunduz)
+        HareketTestYardim.gercekSure()
+
+        // Dawn: hidden over the still night car, fade to the still day car, the day scene from rest.
+        Tema.zorla(Palet.GUNDUZ)
+        assertTrue("geçiş başlamadı", a.hareket!!.oynatici!!.calisiyor)
+        assertEquals(View.INVISIBLE, s.visibility)
+        var adim = 0
+        while ((a.hareket!!.oynatici!!.calisiyor || !a.surusGorunur) && adim < 200) {
+            assertTrue("araçsız kare (şafak, adım $adim)", aracVar())
+            HareketTestYardim.bekle(16)
+            adim++
+        }
+        assertTrue(a.surusGorunur)
+        assertEquals(true, s.kuruluGunduz) // the night set is gone from the views
+        assertEquals(R.drawable.boya_gunduz, a.sahneResmi)
+        repeat(30) {
+            assertTrue(aracVar())
+            HareketTestYardim.bekle(16)
+        }
+
+        // Dusk: the other way round.
+        Tema.zorla(Palet.GECE)
+        assertTrue(a.hareket!!.oynatici!!.calisiyor)
+        assertEquals(View.INVISIBLE, s.visibility)
+        adim = 0
+        while ((a.hareket!!.oynatici!!.calisiyor || !a.surusGorunur) && adim < 200) {
+            assertTrue("araçsız kare (akşam, adım $adim)", aracVar())
+            HareketTestYardim.bekle(16)
+            adim++
+        }
+        assertTrue(a.surusGorunur)
+        assertEquals(false, s.kuruluGunduz)
+        assertEquals(R.drawable.boya_gece, a.sahneResmi)
+        assertTrue(aracVar())
+    }
+
+    @Test
+    fun gunduzSetiGecCozulurseSabitAracBekler() {
+        // Day set decode held back on the worker: after the dawn fade the still day car stays
+        // (the car rule) until the set is in, then the scene shows.
+        geceSurusteSahne()
+        val kuyruk = ArrayList<Runnable>()
+        Arkaplan.yurutucu = Executor { kuyruk += it }
+        Tema.zorla(Palet.GUNDUZ)
+        // The worker is serial: the fade's pictures were asked for first, the drive scene's set
+        // last (HareketBaglayici hears the theme after MainActivity). Hold back only that one.
+        val setIsi = kuyruk.removeAt(kuyruk.lastIndex)
+        Arkaplan.yurutucu = Executor { it.run() }
+        try {
+            kuyruk.toList().forEach { it.run() }
+            kuyruk.clear()
+            TestYardim.gecisleriBitir()
+            assertFalse(a.hareket!!.oynatici!!.calisiyor)
+            assertFalse(a.surusGorunur)
+            assertFalse(s.hazir)
+            assertEquals(View.INVISIBLE, s.visibility)
+            assertEquals(R.drawable.sahne_surus_gunduz, a.sahneResmi)
+            assertTrue(aracVar())
+        } finally {
+            setIsi.run()
+            TestYardim.bosalt()
+        }
+        assertTrue(a.surusGorunur)
+        assertEquals(true, s.kuruluGunduz)
+        assertEquals(R.drawable.boya_gunduz, a.sahneResmi)
+    }
+
+    @Test
+    fun parkteTemaDegisinceSetDegisir() {
+        c = TestYardim.acVeGec() // night, park
+        assertEquals(false, s.kuruluGunduz)
+        Tema.zorla(Palet.GUNDUZ)
+        TestYardim.bosalt()
+        assertEquals("gizli sahne yeni seti hemen alır", true, s.kuruluGunduz)
+        assertTrue(s.hazir)
+        Tema.zorla(Palet.GECE)
+        TestYardim.bosalt()
+        assertEquals(false, s.kuruluGunduz)
     }
 
     @Test
@@ -184,25 +297,69 @@ class SurusBaglamaTest {
         assertEquals(Ekran.SURUS, e.gecerli)
         assertFalse(s.hazir)
         assertEquals(View.INVISIBLE, s.visibility)
-        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_surus, sahneResmi) // the still car meanwhile
+        assertEquals(R.drawable.sahne_surus, sahneResmi) // the still car meanwhile
 
         surusIsi.run()
         TestYardim.bosalt()
         assertTrue(s.hazir)
         assertEquals(View.VISIBLE, s.visibility)
-        assertEquals(dev.kokpit.anaekran.R.drawable.boya_gece, sahneResmi)
+        assertEquals(R.drawable.boya_gece, sahneResmi)
+    }
+
+    @Test
+    fun acilisKlibiDogrudanParkSahnesineSoluyor() { // J1 finding A (0.2.1)
+        // The clip's last frame has sahne_park's rim angle; sahne_karsilama's is half a spoke
+        // pitch off. The intro must fade from the held last frame straight to sahne_park and
+        // never show sahne_karsilama (it would make the spokes jump).
+        SahteVeri.uygula(SahteVeri.parkGece())
+        c = TestYardim.ac()
+        HareketTestYardim.gercekSure()
+        assertEquals(Ekran.ACILIS, e.gecerli)
+        assertEquals("video altındaki sahne = hedef", R.drawable.sahne_park, sahneResmi)
+        val o = TestYardim.oynaticilar.single()
+        assertEquals(R.raw.klip_giris, o.klip)
+        o.dinleyici!!.basladi()
+        o.dinleyici!!.kareGeldi()
+        o.dinleyici!!.bitti()
+        var park: android.graphics.Bitmap? = null
+        Gorseller.al(a.resources, R.drawable.sahne_park) { park = it }
+        assertNotNull(park)
+        var hedefGoruldu = false
+        var adim = 0
+        while (a.acilisSuruyor && adim++ < 300) {
+            val v = a.katmanlar.video
+            for (i in 0 until v.childCount) {
+                val iv = v.getChildAt(i) as? android.widget.ImageView ?: continue
+                if (iv.visibility != View.VISIBLE) continue
+                val b = (iv.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: continue
+                if (b.width == 768 && b.height == 1024) {
+                    assertTrue("solma hedefi sahne_park değil (adım $adim)", b === park)
+                    hedefGoruldu = true
+                }
+            }
+            HareketTestYardim.bekle(16)
+        }
+        assertFalse(a.acilisSuruyor)
+        assertTrue("solma görülmedi", hedefGoruldu)
+        assertEquals(Ekran.PARK, e.gecerli)
+        assertEquals(R.drawable.sahne_park, sahneResmi)
+        assertFalse("sahne_karsilama hiç çözülmemeli", Gorseller.hazirMi(R.drawable.sahne_karsilama))
     }
 
     // --- İ-F2 ---
 
     private val R_ARAC = setOf(
-        dev.kokpit.anaekran.R.drawable.sahne_surus, dev.kokpit.anaekran.R.drawable.sahne_surus_gunduz,
-        dev.kokpit.anaekran.R.drawable.sahne_park, dev.kokpit.anaekran.R.drawable.sahne_park_gunduz,
+        R.drawable.sahne_surus, R.drawable.sahne_surus_gunduz,
+        R.drawable.sahne_park, R.drawable.sahne_park_gunduz,
     )
 
     /** Some full, opaque picture of the car is on screen: the moving scene, a cover, or the scene picture. */
     private fun aracVar(): Boolean {
-        if (s.visibility == View.VISIBLE) return true
+        // A visible scene has a set on its views, and it is the set of the ground under it.
+        if (s.visibility == View.VISIBLE) {
+            val zemin = if (s.kuruluGunduz == true) R.drawable.boya_gunduz else R.drawable.boya_gece
+            return s.kuruluGunduz != null && (a.sahneResmi == zemin || a.sahneResmi in R_ARAC)
+        }
         val v = a.katmanlar.video
         for (i in 0 until v.childCount) {
             val c = v.getChildAt(i)
@@ -231,7 +388,9 @@ class SurusBaglamaTest {
             HareketTestYardim.bekle(16)
         }
         assertFalse(a.hareket!!.oynatici!!.calisiyor)
-        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_surus_gunduz, a.sahneResmi)
+        // 0.2.1: the fade ended on the still day car, then the day scene took over from rest.
+        assertTrue(a.surusGorunur)
+        assertEquals(R.drawable.boya_gunduz, a.sahneResmi)
         assertTrue(aracVar())
     }
 
@@ -245,12 +404,12 @@ class SurusBaglamaTest {
         TestYardim.bosalt()
         assertEquals(View.INVISIBLE, s.visibility)
         assertTrue("örtü yok", aracVar())
-        assertEquals(dev.kokpit.anaekran.R.raw.klip_surus_geri, TestYardim.oynaticilar.last().klip)
+        assertEquals(R.raw.klip_surus_geri, TestYardim.oynaticilar.last().klip)
         repeat(240) {
             assertTrue("araçsız kare (adım $it)", aracVar())
             TestYardim.bekle(16)
         }
-        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_park, a.sahneResmi)
+        assertEquals(R.drawable.sahne_park, a.sahneResmi)
     }
 
     @Test
@@ -330,18 +489,34 @@ class SurusBaglamaTest {
         TestYardim.kareler(20)
         TestYardim.gecisleriBitir()
         TestYardim.kareler(20)
+        // Day (0.2.1): during the dawn fade the scene is hidden and the screen's loop reads...
+        HareketTestYardim.gercekSure()
         Tema.zorla(Palet.GUNDUZ)
+        assertFalse(s.calisiyor)
         val gunduzOnce = a.hizDongusu.okumaSayisi
-        TestYardim.kareler(20)
-        assertTrue(a.hizDongusu.okumaSayisi > gunduzOnce) // by day the screen's loop reads
+        TestYardim.kareler(10)
+        assertTrue(a.hizDongusu.okumaSayisi > gunduzOnce)
+        // ...then the day scene runs and is the only reader, like at night.
+        HareketTestYardim.bekle(1500)
+        assertTrue(a.surusGorunur)
+        assertTrue(s.calisiyor)
+        assertEquals(true, s.kuruluGunduz)
+        val gunduzSahnede = a.hizDongusu.okumaSayisi
+        ornek(40f)
+        TestYardim.kareler(60)
+        assertEquals("gündüz ekran döngüsü okumamalı", gunduzSahnede, a.hizDongusu.okumaSayisi)
+        assertFalse(a.hizDongusu.bekliyor)
+        assertTrue(surusEkrani.hizMetni.toString().toInt() in 40..80)
         assertTrue(okumalar.isNotEmpty())
         assertTrue("çift okuma: ${okumalar.filterValues { it > 1 }}", okumalar.values.all { it == 1 })
     }
 
     @Test
     fun durgunDongulerDurur() {
+        // The screen's loop alone: no motion hook, so no drive scene (by day it runs too since 0.2.1).
+        Baglayicilar.uret = { emptyList() }
         c = TestYardim.acVeGec()
-        Tema.zorla(Palet.GUNDUZ) // the screen's loop alone
+        assertNull(a.surusSahnesi)
         hal(HareketHali.SURUS)
         TestYardim.gecisleriBitir()
         ornek(0f)
@@ -515,7 +690,7 @@ class SurusBaglamaTest {
         c = TestYardim.acVeGec()
         a.katmanlar.kareHizi.performLongClick()
         val m = a.teshis.metin.toString()
-        for (s in listOf("Sürüş sahnesi:", "tempo ", "Hz", "Hız göstergesi:", "GPS aralığı", "GPS hız: ham", "yumuşatma", "Klip: ")) {
+        for (s in listOf("Sürüş sahnesi:", "set gece", "tempo ", "Hz", "Hız göstergesi:", "GPS aralığı", "GPS hız: ham", "yumuşatma", "Klip: ")) {
             assertTrue("$s yok:\n$m", m.contains(s))
         }
         a.teshis.kapat()

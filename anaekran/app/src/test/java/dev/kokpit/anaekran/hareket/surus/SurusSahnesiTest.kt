@@ -7,7 +7,10 @@ import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
+import android.graphics.Color
+import dev.kokpit.anaekran.arayuz.Arkaplan
 import dev.kokpit.anaekran.hareket.HareketIzci
+import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.hareket.KareKaynagi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -82,13 +85,13 @@ class SurusSahnesiTest {
             assertEquals(Bitmap.Config.ARGB_8888, b.config)
         }
         assertEquals(Bitmap.Config.ARGB_8888, v.govde.config)
-        assertEquals(600, v.isik.width)
-        assertEquals(60, v.isik.height)
+        assertEquals(600, v.isik!!.width)
+        assertEquals(60, v.isik!!.height)
         assertTrue("≈1,25 MB (${v.bayt})", v.bayt in 1_200_000L..1_400_000L)
         assertTrue("arka plan dahil ≤ 12 MB", v.bayt + SurusVarliklari.SAHNE_BAYT <= 12L * 1048576L)
         // the lights tile has the four dots and transparent space between them
-        assertTrue(Color32.alfa(v.isik.getPixel(20, 30)) > 60)
-        assertEquals(0, Color32.alfa(v.isik.getPixel(100, 5)))
+        assertTrue(Color32.alfa(v.isik!!.getPixel(20, 30)) > 60)
+        assertEquals(0, Color32.alfa(v.isik!!.getPixel(100, 5)))
     }
 
     private object Color32 {
@@ -336,5 +339,116 @@ class SurusSahnesiTest {
         s.basla()
         assertTrue(kaynak.bekleyen.isEmpty())
         assertNotEquals(0, okuma)
+    }
+
+    // --- Day set (K-108, 0.2.1) ---
+
+    @Test
+    fun gunduzSeti_boyutVeBellek() {
+        val v = SurusVarliklari.coz(a.resources, gunduz = true)
+        assertTrue(v.gunduz)
+        assertEquals(798, v.govde.width)
+        assertEquals(SurusYerlesim.GOVDE_H_GUNDUZ, v.govde.height)
+        assertEquals(382, SurusYerlesim.govdeH(true))
+        assertEquals(272, SurusYerlesim.govdeH(false))
+        for (b in v.tekerOn + v.tekerArka) {
+            assertEquals(101, b.width)
+            assertEquals(101, b.height)
+        }
+        assertEquals("gündüz şehir ışığı deseni yok", null, v.isik)
+        // both sets for a moment (theme change) + the full-screen ground: under the 12 MB budget
+        val gece = SurusVarliklari.coz(a.resources)
+        assertTrue("${v.bayt + gece.bayt}", v.bayt + gece.bayt + SurusVarliklari.SAHNE_BAYT <= 12L * 1048576L)
+        assertTrue("gündüz ≈ 1,4 MiB (${v.bayt})", v.bayt in 1_400_000L..1_500_000L)
+    }
+
+    @Test
+    fun gunduzSeti_lambaKapaliIsikYokRenklerGunduz() {
+        assertTrue("gündüz lamba ≤ %10", SurusFormul.LAMBA_GUNDUZ_OPAKLIK in 0f..0.10f)
+        s.varliklariKur(SurusVarliklari.coz(a.resources, gunduz = true))
+        assertTrue(s.hazir)
+        assertEquals(true, s.kuruluGunduz)
+        val arka = s.arkaGorunumu as ArkaKatman
+        assertEquals("şehir ışığı yok", null, arka.isik)
+        // Body view has the day bitmap's height (CENTER must not shift it; the band must not smear).
+        kap.measure(View.MeasureSpec.makeMeasureSpec(768, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(1024, View.MeasureSpec.EXACTLY))
+        kap.layout(0, 0, 768, 1024)
+        assertEquals(382, s.govdeGorunumu.height)
+        assertEquals(382, s.yansimaGorunumu.layoutParams.height)
+        assertEquals(SurusYerlesim.GOVDE_Y, s.govdeGorunumu.top)
+        // Lamp reflection off: its view is GONE and never draws, at any speed.
+        val y = s.yansimaGorunumu
+        assertEquals(View.GONE, y.visibility)
+        hiz = 50f / 3.6f
+        durgun = false
+        s.basla()
+        repeat(300) { // 5 s at 50 km/h ≈ 69 m: two lamp periods
+            kareler(1)
+            assertFalse("gündüz lamba bandı", y.ciziyor)
+        }
+        assertTrue(s.model.mesafe > 60.0)
+        // The day palette's lane / speed-line colours; the lines still move and fade in.
+        val on = s.onGorunumu as OnKatman
+        assertEquals(Color.rgb(40, 60, 100), on.yakin.renk and 0x00FFFFFF or (0xFF shl 24))
+        assertEquals(Math.round(Color.alpha(Palet.GUNDUZ.serit) * SurusFormul.YAKIN_OPAKLIK), Color.alpha(on.yakin.renk))
+        assertEquals(Math.round(Color.alpha(Palet.GUNDUZ.serit) * SurusFormul.UZAK_OPAKLIK), Color.alpha(arka.uzak.renk))
+        assertEquals(Palet.GUNDUZ.iz, (s.izGorunumu as IzKatmani).renk)
+        assertEquals(1f, s.onGorunumu.alpha, 0f)
+        assertTrue(s.tekerOnGorunumleri.any { it.alpha > 0f })
+
+        // Back to night: the lamp and the lights come back, night colours, body 272.
+        s.varliklariKur(SurusVarliklari.coz(a.resources))
+        assertEquals(View.VISIBLE, y.visibility)
+        assertTrue(arka.isik != null)
+        assertEquals(Palet.GECE.iz, (s.izGorunumu as IzKatmani).renk)
+        assertEquals(Math.round(Color.alpha(Palet.GECE.serit) * SurusFormul.YAKIN_OPAKLIK), Color.alpha(on.yakin.renk))
+        assertEquals(272, s.govdeGorunumu.layoutParams.height)
+    }
+
+    @Test
+    fun geceRenkleri02IleAyni() {
+        // 0.2's hard-coded demo colours, now taken from the palette: pixel-identical at night.
+        val on = s.onGorunumu as OnKatman
+        val arka = s.arkaGorunumu as ArkaKatman
+        assertEquals(Color.argb(Math.round(255 * 0.55f * 0.55f), 220, 226, 236), on.yakin.renk)
+        assertEquals(Color.argb(Math.round(255 * 0.55f * 0.35f), 220, 226, 236), arka.uzak.renk)
+        assertEquals(Color.argb(Math.round(255 * 0.30f), 150, 180, 240), (s.izGorunumu as IzKatmani).renk)
+    }
+
+    @Test
+    fun setDegisimi_gorunurkenBekler_gizleninceGirer() {
+        val eski = Arkaplan.yurutucu
+        Arkaplan.yurutucu = java.util.concurrent.Executor { it.run() }
+        try {
+            assertEquals(false, s.kuruluGunduz)
+            val govdeGece = (s.govdeGorunumu.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+            // Visible with the night set: the day set is decoded but waits (no car swap on screen).
+            s.varliklariYukle(gunduz = true)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(s.gunduz)
+            assertFalse(s.hazir)
+            assertEquals(false, s.kuruluGunduz)
+            assertTrue(govdeGece === (s.govdeGorunumu.drawable as android.graphics.drawable.BitmapDrawable).bitmap)
+            var n = 0
+            s.hazirOlunca = { n++ }
+            // Hidden: it goes in (posted, never inside the caller's hide).
+            s.visibility = View.INVISIBLE
+            assertEquals(false, s.kuruluGunduz)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(true, s.kuruluGunduz)
+            assertTrue(s.hazir)
+            assertEquals(1, n)
+            assertEquals(382, (s.govdeGorunumu.drawable as android.graphics.drawable.BitmapDrawable).bitmap.height)
+            // Asking again for the set in place: nothing decoded, nothing changes.
+            s.varliklariYukle(gunduz = true)
+            assertTrue(s.hazir)
+            // Hidden: the night set goes in as soon as it is decoded.
+            s.varliklariYukle(gunduz = false)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(false, s.kuruluGunduz)
+            assertTrue(s.hazir)
+        } finally {
+            Arkaplan.yurutucu = eski
+        }
     }
 }

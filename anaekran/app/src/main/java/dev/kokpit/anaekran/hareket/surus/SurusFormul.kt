@@ -60,6 +60,14 @@ object SurusFormul {
     const val LAMBA_EGIM_DERECE = -18f
     const val LAMBA_OPAKLIK = 0.38f
 
+    /**
+     * Day (K-108: "off or under 10 %"): OFF. A street lamp's warm reflection does not exist in
+     * daylight, and the band is the scene's most expensive draw (ComposeShader over the body,
+     * research decision 4): off costs nothing (the view is GONE). Peak opacity by day, the one
+     * place to change it (≤ 0.10); the scene scales the band by this / [LAMBA_OPAKLIK].
+     */
+    const val LAMBA_GUNDUZ_OPAKLIK = 0f
+
     // --- Speed lines behind the tail ---
     const val IZ_TAM_KMH = 80f
 

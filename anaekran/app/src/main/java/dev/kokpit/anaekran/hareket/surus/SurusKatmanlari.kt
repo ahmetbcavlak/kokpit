@@ -15,6 +15,7 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.Shader
 import android.view.View
 import android.view.ViewGroup
+import dev.kokpit.anaekran.tema.Palet
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -81,18 +82,33 @@ open class SurusKabi(context: Context) : ViewGroup(context) {
 /**
  * One dashed lane line (3 m dash + 6 m gap) moving to the right. The fade at both screen edges
  * is a gradient fixed in screen space (the paint's shader), so only the dash rectangles move:
- * no shader matrix per frame.
+ * no shader matrix per frame. Colour: [renkAyarla] with the palette's `serit` (its alpha is the
+ * demo's 55 %) × the line's [opaklik]; the shader is rebuilt only when the colour changes.
  */
-internal class SeritCizgisi(olcek: Float, opaklik: Float) {
+internal class SeritCizgisi(olcek: Float, private val opaklik: Float) {
     val periyot = SurusFormul.seritPeriyodu(olcek)
     val dolu = SurusFormul.seritDolu(olcek)
-    private val boya = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        // demo: rgba(220,226,236,.55) × the line's opacity
-        val c = Color.argb(Math.round(255 * 0.55f * opaklik), 220, 226, 236)
-        val s = c and 0x00FFFFFF
-        shader = LinearGradient(
+    private val boya = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var taban = 0
+
+    /** The colour drawn (tests): the base colour with alpha × the line's opacity. */
+    var renk = 0
+        private set
+
+    init {
+        renkAyarla(Palet.GECE.serit)
+    }
+
+    /** [c]: the palette's lane colour (alpha = the demo's 55 %). */
+    fun renkAyarla(c: Int) {
+        if (c == taban && boya.shader != null) return
+        taban = c
+        val r = Color.argb(Math.round(Color.alpha(c) * opaklik), Color.red(c), Color.green(c), Color.blue(c))
+        renk = r
+        val s = r and 0x00FFFFFF
+        boya.shader = LinearGradient(
             0f, 0f, SurusYerlesim.TASARIM_W.toFloat(), 0f,
-            intArrayOf(s, c, c, s),
+            intArrayOf(s, r, r, s),
             floatArrayOf(0f, SurusYerlesim.SERIT_KENAR, 1f - SurusYerlesim.SERIT_KENAR, 1f),
             Shader.TileMode.CLAMP,
         )
@@ -111,7 +127,8 @@ internal class SeritCizgisi(olcek: Float, opaklik: Float) {
 
 /**
  * Behind the car, bottom to top (demo z-index 1, DOM order): distant city lights, far lane
- * line. Bounds: y 447 (lights) … 587 (far line), full width.
+ * line. Bounds: y 447 (lights) … 587 (far line), full width. By day there is no light tile
+ * ([isik] null, K-108: no city lights in daylight): the far line alone, no light draw at all.
  * Lights: each dot of the 600 px tile is drawn on its own (a small source rectangle of the tile,
  * at a fractional x with bitmap filtering: smooth sub-pixel motion), its alpha × the demo's
  * edge mask (`linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent)`) taken at
@@ -121,7 +138,7 @@ internal class SeritCizgisi(olcek: Float, opaklik: Float) {
 @SuppressLint("ViewConstructor")
 class ArkaKatman(context: Context) : SurusKatmani(context) {
     private val ust = SurusYerlesim.ISIK_Y.toFloat()
-    private val uzak = SeritCizgisi(SurusFormul.UZAK_OLCEK, SurusFormul.UZAK_OPAKLIK)
+    internal val uzak = SeritCizgisi(SurusFormul.UZAK_OLCEK, SurusFormul.UZAK_OPAKLIK)
     private val isikBoya = Paint(Paint.FILTER_BITMAP_FLAG)
     private val kaynak = android.graphics.Rect()
     private val hedef = android.graphics.RectF()
@@ -173,7 +190,7 @@ class ArkaKatman(context: Context) : SurusKatmani(context) {
 /** In front of the car (demo z-index 3): the near lane line. */
 @SuppressLint("ViewConstructor")
 class OnKatman(context: Context) : SurusKatmani(context) {
-    private val yakin = SeritCizgisi(1f, SurusFormul.YAKIN_OPAKLIK)
+    internal val yakin = SeritCizgisi(1f, SurusFormul.YAKIN_OPAKLIK)
     var ofset = 0f
 
     override fun onDraw(c: Canvas) = yakin.ciz(c, ofset, SurusYerlesim.YAKIN_Y - Y, SurusYerlesim.YAKIN_H)
@@ -185,16 +202,29 @@ class OnKatman(context: Context) : SurusKatmani(context) {
 }
 
 /**
- * Speed lines behind the tail: a 1 px line every 12 px, rgba(150,180,240,.30), fading in over
- * the first 20 % of the box and out to the right (demo). Static content; its opacity is the
- * view's alpha (no re-recording per frame).
+ * Speed lines behind the tail: a 1 px line every 12 px in the palette's `iz` colour (night
+ * rgba(150,180,240,.30), day 0.1 Y-11's ink), fading in over the first 20 % of the box and out
+ * to the right (demo). Static content; its opacity is the view's alpha (no re-recording per
+ * frame). [renkAyarla] re-records once when the set changes.
  */
 @SuppressLint("ViewConstructor")
 class IzKatmani(context: Context) : SurusKatmani(context) {
-    private val boya = Paint().apply {
-        val c = Color.argb(Math.round(255 * 0.30f), 150, 180, 240)
+    private val boya = Paint()
+
+    /** The colour drawn (tests). */
+    var renk = 0
+        private set
+
+    init {
+        renkAyarla(Palet.GECE.iz)
+    }
+
+    fun renkAyarla(c: Int) {
+        if (c == renk && boya.shader != null) return
+        renk = c
         val s = c and 0x00FFFFFF
-        shader = LinearGradient(0f, 0f, SurusYerlesim.IZ_W.toFloat(), 0f, intArrayOf(s, c, s), floatArrayOf(0f, 0.2f, 1f), Shader.TileMode.CLAMP)
+        boya.shader = LinearGradient(0f, 0f, SurusYerlesim.IZ_W.toFloat(), 0f, intArrayOf(s, c, s), floatArrayOf(0f, 0.2f, 1f), Shader.TileMode.CLAMP)
+        invalidate()
     }
 
     override fun onDraw(c: Canvas) {

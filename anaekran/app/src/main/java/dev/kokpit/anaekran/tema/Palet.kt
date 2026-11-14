@@ -19,6 +19,19 @@ data class Palet(
     val ok: Int,
     val acc: Int,
     val onacc: Int,
+    /**
+     * Drive scene lane lines (K-94/K-108): the colour at the demo's 55 % (× each line's own
+     * opacity). Not in tokens.json: night is the 0.2 demo's rgba(220,226,236,.55); day is the
+     * 0.1 Y-11 speed-line ink at the same 55 %, because the night colour on the day ground
+     * (≈ #D9DDE0 at the lane rows) differs by 1–4 levels and the lines would vanish.
+     */
+    val serit: Int,
+    /**
+     * Drive scene speed lines behind the tail. Night: the 0.2 demo's rgba(150,180,240,.30);
+     * day: 0.1 Y-11's static day speed lines, rgba(40,60,100,.22) — the ones the day scene
+     * replaces (the night colour would be a faint blue tint on the light ground).
+     */
+    val iz: Int,
 ) {
     companion object {
         /** tokens.json "gece". */
@@ -37,6 +50,8 @@ data class Palet(
             ok = Color.parseColor("#5FD08A"),
             acc = Color.parseColor("#F2B35E"),
             onacc = Color.parseColor("#1A1206"),
+            serit = rgba(220, 226, 236, 0.55),
+            iz = rgba(150, 180, 240, 0.30),
         )
 
         /** tokens.json "gunduz". */
@@ -55,6 +70,8 @@ data class Palet(
             ok = Color.parseColor("#1F8A4C"),
             acc = Color.parseColor("#8A4F00"),
             onacc = Color.parseColor("#FFFFFF"),
+            serit = rgba(40, 60, 100, 0.55),
+            iz = Color.argb(56, 40, 60, 100),
         )
 
         /** tokens.json "vurgu" (theme-independent accent). */

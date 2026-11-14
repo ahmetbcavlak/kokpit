@@ -55,9 +55,12 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  *     full-screen, transparent view that takes no touches; MainActivity puts it in its own root
  *     layer (`Katmanlar.surus`, MATCH_PARENT) between the scene picture and the video, under
  *     every screen — not inside the SURUS screen, so a screen change or a panel never redraws it
- *     inside a hardware layer (İ-M2 K7). The bitmaps are decoded on the worker
- *     thread right away (≈ 1.25 MB); keep the scene INVISIBLE until `sahne.hazirOlunca { … }`
- *     fires (before that it has no car). The frame-rate counter hears its motion by itself.
+ *     inside a hardware layer (İ-M2 K7). The bitmaps of the theme's set (night or day,
+ *     `Tema.palet.gunduz`: the scene picture's rule, K-108) are decoded on the worker thread right
+ *     away (≈ 1.2 / 1.4 MiB); keep the scene INVISIBLE until `sahne.hazirOlunca { … }` fires (before
+ *     that it has no car). On every theme change [temaDegisti] asks the scene for the other set:
+ *     it is decoded at once, and goes in when the scene is hidden (`sahne.hazir` false until then;
+ *     re-arm `hazirOlunca`). The frame-rate counter hears its motion by itself.
  *  8. Speed (veri/HizYumusatici, m/s, System.nanoTime timebase):
  *     `hareket.surusHizi(HizSaglayici(Hiz.yumusatici::deger), DurgunSaglayici(Hiz.yumusatici::durgun))`
  *     (primitive fun interfaces: no boxing per frame). `bilinmiyor` needs nothing here: `deger`
@@ -72,24 +75,27 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  *     `hareket.surusKaresi(KareDinleyici { zamanNs, hizMs -> surusEkrani.hizGoster(hizMs * 3.6) })`
  *     (after every drawn frame; while the scene is still the last value holds and is right;
  *     `Hiz.yumusatici.eskiMi(zamanNs)` / `bilinmiyor` may be read in the same callback, they do not
- *     move the spring). The callback comes only while the scene runs. When it does not (day: scene
- *     INVISIBLE; while `Klip.SURUS` plays; before `hazirOlunca`), the screen reads `deger` on its
- *     own frame loop instead — the test is `hareket.surus?.calisiyor`; never both.
+ *     move the spring). The callback comes only while the scene runs. When it does not (scene
+ *     INVISIBLE: while `Klip.SURUS` or a fade plays, a panel or the diagnostics is open, before
+ *     `hazirOlunca`), the screen reads `deger` on its own frame loop instead — the test is
+ *     `hareket.surus?.calisiyor`, by day as by night; never both.
  *  9. Running: [basla]/[dur] (onResume/onPause, already wired as a Baglayici) start and stop it;
  *     on top of that it runs only while it is visible (a GONE/INVISIBLE SURUS screen stops it).
  *     Nothing else to call per frame.
- * 10. Night only: the body and wheels are the night car. By day keep 0.1's static picture
- *     (scene layer `sahne_surus_gunduz`) and leave the drive scene INVISIBLE.
- * 11. Scene layer under it at night: `boya_gece` (no car — the scene draws the car). Park → drive
- *     at night: keep the drive scene INVISIBLE while `Klip.SURUS` plays (the clip has its own
- *     car), and in the clip's `bitti` switch the scene layer to `boya_gece`, make the drive
- *     scene VISIBLE and call `sahne.durgundanBasla()`: its first frame equals the clip's last
- *     one (wheel angle 0, camera 1, lines/lights at alpha 0; PSNR 36.5 dB against sahne_surus),
- *     then over 1 s the speed and the lines/lights come in.
- *     Drive → park: hide the scene when `Klip.SURUS_GERI` starts (its poster is sahne_surus, the
- *     same still car; at the switch the car is below 5 km/h, so nearly at rest).
- * 12. Remove `Cizgiler.hizCizgileri` from SurusEkrani's drawing: the scene draws the speed lines
- *     itself (with the speed-dependent opacity), otherwise they are doubled.
+ * 10. Night and day (0.2.1, K-108): the night set is the night car, the day set the day car
+ *     (same layout; no city lights, lamp reflection off — SurusFormul.LAMBA_GUNDUZ_OPAKLIK —,
+ *     day lane / speed-line colours). Which one: the scene picture's day/night rule.
+ * 11. Scene layer under it: `boya_gece` / `boya_gunduz` (no car — the scene draws the car).
+ *     Park → drive at night: keep the drive scene INVISIBLE while `Klip.SURUS` plays (the clip
+ *     has its own car), and in the clip's `bitti` switch the scene layer to `boya_gece`, make the
+ *     drive scene VISIBLE and call `sahne.durgundanBasla()`: its first frame equals the clip's
+ *     last one (wheel angle 0, camera 1, lines/lights at alpha 0; 36.3 dB against sahne_surus),
+ *     then over 1 s the speed and the lines/lights come in. By day there is no clip: a plain
+ *     fade sahne_park_gunduz → sahne_surus_gunduz, then the same with `boya_gunduz` (38.6 dB).
+ *     Drive → park: hide the scene when `Klip.SURUS_GERI` (day: the plain fade) starts (its
+ *     poster / cover is the same still car; at the switch the car is below 5 km/h, so nearly at rest).
+ * 12. SurusEkrani draws no speed lines (0.1's static day lines are gone too): the scene draws
+ *     them itself, with the speed-dependent opacity, by day and night.
  * 13. The SURUS screen's own layers may enter with `Zamanlama.giris(view, sira)`; the screen
  *     change itself already uses the K-93 timings ([YumusakGecis], 1.1 s).
  */
@@ -173,6 +179,8 @@ class HareketBaglayici(
 
     override fun temaDegisti(palet: Palet) {
         sayac?.temaUygula(palet)
+        // The drive scene's set follows the scene picture's day/night rule (wiring step 7, K-108).
+        surus?.varliklariYukle(palet.gunduz)
     }
 
     /**
@@ -224,7 +232,7 @@ class HareketBaglayici(
         it.hizSaglayici = surusHizi
         it.durgunSaglayici = surusDurgun
         it.kareDinleyici = surusKaresi
-        it.varliklariYukle()
+        it.varliklariYukle(Tema.palet.gunduz)
         if (calisiyor) it.basla()
         surus = it
     }

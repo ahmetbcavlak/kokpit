@@ -10,38 +10,45 @@ import kotlin.math.exp
 import kotlin.math.sqrt
 
 /**
- * The drive scene's bitmaps, decoded once on the worker thread (never on the main thread: the
- * body alone is ~40 ms of webp decoding on a Cortex-A7).
+ * The drive scene's bitmaps, one set — night or day (K-108) — decoded once on the worker thread
+ * (never on the main thread: the body alone is ~40 ms of webp decoding on a Cortex-A7).
  *  - ARGB_8888, not HARDWARE: the body is sampled by the lamp reflection's BitmapShader
  *    (research decision 5; a hardware bitmap takes another sampler path on API 27);
  *  - already at their on-screen size (no runtime scaling, no 5.8 MB 1600×900 decode);
- *  - the city-lights tile (600×60) is generated here, blur included (no live blur).
+ *  - the city-lights tile (600×60) is generated here, blur included (no live blur) — night only:
+ *    there are no city lights by day, so the day set has none ([isik] null).
  *
- * Memory (research decision 15): body 798×272 (0.87 MB) + 6 sprites 101×101 (0.24 MB) + lights
- * 600×60 (0.14 MB) = 1.25 MB, the same again as GPU textures. With the full-screen background
- * (3.15 MB) the set drawn in one frame is ≈ 4.4 MB, well under the 12 MB budget; [boyutlariYaz]
- * logs it on every load.
+ * Memory (research decision 15): night body 798×272 (0.83 MiB) + 6 sprites 101×101 (0.23 MiB) +
+ * lights 600×60 (0.14 MiB) = 1.20 MiB; day body 798×382 (1.16 MiB) + sprites = 1.40 MiB; the
+ * same again as GPU textures. The scene holds one set; on a theme change the other is decoded
+ * and the old one dropped once the new one is on the views, so for a moment both exist
+ * (≈ 2.6 MiB + the full-screen background 3 MiB, ≈ 5.6 MiB, under the 12 MB budget).
+ * [boyutlariYaz] logs it on every load.
  */
 class SurusVarliklari(
     val govde: Bitmap,
     /** [0] sharp, [1] light blur, [2] full blur. */
     val tekerOn: Array<Bitmap>,
     val tekerArka: Array<Bitmap>,
-    val isik: Bitmap,
+    /** City-lights tile; null by day. */
+    val isik: Bitmap?,
+    /** The day set (surus_*_gunduz) — the scene picture's day/night rule picks it. */
+    val gunduz: Boolean = false,
 ) {
     /** Bytes of every bitmap held here. */
     val bayt: Long
-        get() = (listOf(govde, isik) + tekerOn + tekerArka).sumOf { it.allocationByteCount.toLong() }
+        get() = (listOfNotNull(govde, isik) + tekerOn + tekerArka).sumOf { it.allocationByteCount.toLong() }
 
     fun boyutlariYaz() {
         val mb = { b: Long -> String.format(java.util.Locale.ROOT, "%.2f", b / 1048576.0) }
         val arka = SAHNE_BAYT
         val toplam = bayt + arka
+        val i = isik
         Log.i(
             ETIKET,
-            "sürüş varlıkları: gövde ${govde.width}×${govde.height} (${mb(govde.allocationByteCount.toLong())} MB), " +
+            "sürüş varlıkları (${if (gunduz) "gündüz" else "gece"}): gövde ${govde.width}×${govde.height} (${mb(govde.allocationByteCount.toLong())} MB), " +
                 "teker 6×${tekerOn[0].width}×${tekerOn[0].height} (${mb((tekerOn + tekerArka).sumOf { it.allocationByteCount.toLong() })} MB), " +
-                "ışık ${isik.width}×${isik.height} (${mb(isik.allocationByteCount.toLong())} MB); " +
+                (if (i != null) "ışık ${i.width}×${i.height} (${mb(i.allocationByteCount.toLong())} MB); " else "ışık yok; ") +
                 "toplam ${mb(bayt)} MB; arka plan dahil aynı karede ≈ ${mb(toplam)} MB (bütçe ${BUTCE_MB} MB)",
         )
         if (toplam > BUTCE_MB * 1048576L) Log.w(ETIKET, "sürüş sahnesi bitmap bütçesini aşıyor")
@@ -56,27 +63,38 @@ class SurusVarliklari(
         /** One full-screen ARGB_8888 background (the scene layer under the drive scene). */
         const val SAHNE_BAYT = 768L * 1024L * 4L
 
-        /** Decodes on [Arkaplan]'s worker; [sonra] on the main thread (null: failed, logged). */
-        fun yukle(res: Resources, sonra: (SurusVarliklari?) -> Unit) {
-            Arkaplan.calistir({ coz(res) }) { v ->
+        /** Decodes the [gunduz] set on [Arkaplan]'s worker; [sonra] on the main thread (null: failed, logged). */
+        fun yukle(res: Resources, gunduz: Boolean, sonra: (SurusVarliklari?) -> Unit) {
+            Arkaplan.calistir({ coz(res, gunduz) }) { v ->
                 v?.boyutlariYaz()
                 sonra(v)
             }
         }
 
-        /** Synchronous decode (worker thread, tests). */
-        fun coz(res: Resources): SurusVarliklari {
+        /** Synchronous decode of the night (or [gunduz]) set (worker thread, tests). */
+        fun coz(res: Resources, gunduz: Boolean = false): SurusVarliklari {
             val o = BitmapFactory.Options().apply {
                 inScaled = false
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             fun c(id: Int): Bitmap = checkNotNull(BitmapFactory.decodeResource(res, id, o)) { "çözülemedi: $id" }
-            return SurusVarliklari(
-                govde = c(R.drawable.surus_govde),
-                tekerOn = arrayOf(c(R.drawable.surus_teker_on_0), c(R.drawable.surus_teker_on_1), c(R.drawable.surus_teker_on_2)),
-                tekerArka = arrayOf(c(R.drawable.surus_teker_arka_0), c(R.drawable.surus_teker_arka_1), c(R.drawable.surus_teker_arka_2)),
-                isik = isikDeseni(),
-            )
+            return if (gunduz) {
+                SurusVarliklari(
+                    govde = c(R.drawable.surus_govde_gunduz),
+                    tekerOn = arrayOf(c(R.drawable.surus_teker_on_0_gunduz), c(R.drawable.surus_teker_on_1_gunduz), c(R.drawable.surus_teker_on_2_gunduz)),
+                    tekerArka = arrayOf(c(R.drawable.surus_teker_arka_0_gunduz), c(R.drawable.surus_teker_arka_1_gunduz), c(R.drawable.surus_teker_arka_2_gunduz)),
+                    isik = null,
+                    gunduz = true,
+                )
+            } else {
+                SurusVarliklari(
+                    govde = c(R.drawable.surus_govde),
+                    tekerOn = arrayOf(c(R.drawable.surus_teker_on_0), c(R.drawable.surus_teker_on_1), c(R.drawable.surus_teker_on_2)),
+                    tekerArka = arrayOf(c(R.drawable.surus_teker_arka_0), c(R.drawable.surus_teker_arka_1), c(R.drawable.surus_teker_arka_2)),
+                    isik = isikDeseni(),
+                    gunduz = false,
+                )
+            }
         }
 
         /**

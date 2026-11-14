@@ -11,16 +11,27 @@ package dev.kokpit.anaekran.hareket.surus
  *    the picture by ≤ 2 of 255 levels) and to what any camera scale can show (x −18…780).
  *  - surus_teker_{on,arka}_{0,1,2}.webp: the 168 px sprites resampled to 101 px with the wheel
  *    centre exactly at the sprite centre (50.5, 50.5).
+ * Day layers (design pack 0.3 §2, K-108): same camera, centres and scale, so every constant
+ * here holds for both sets — except the body's height. surus_govde_gunduz.webp keeps 382 px
+ * (to y 783) instead of 272: on the light ground the day shadow fades out far below the alpha-12
+ * box, and cutting it at 272 left a 3–4 level horizontal edge (J1 finding B; 0.33 MiB more).
+ * Same top-left, so the lamp reflection's coordinates do not change.
  */
 object SurusYerlesim {
     const val TASARIM_W = 768
     const val TASARIM_H = 1024
 
-    /** Body bitmap (cropped) top-left and size. */
+    /** Body bitmap (cropped) top-left and size (night). */
     const val GOVDE_X = -18
     const val GOVDE_Y = 401
     const val GOVDE_W = 798
     const val GOVDE_H = 272
+
+    /** Day body height: the soft ground shadow is kept to its end (see the class notes). */
+    const val GOVDE_H_GUNDUZ = 382
+
+    /** Body bitmap height for the day or night set. */
+    fun govdeH(gunduz: Boolean): Int = if (gunduz) GOVDE_H_GUNDUZ else GOVDE_H
 
     /** The demo's full body box (lamp reflection coordinates): left/top/width/height. */
     const val KUTU_X = -74.634f

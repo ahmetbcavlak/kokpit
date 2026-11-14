@@ -129,21 +129,6 @@ object Cizgiler {
         dolgu.shader = null
     }
 
-    /**
-     * Y-3 speed lines behind the car's tail: 1 px lines every 12 px in (568, 421, 200, 157),
-     * faded in from the left and out to the right (CSS mask: transparent → black 20 % → transparent).
-     */
-    fun hizCizgileri(c: Canvas, p: Palet) {
-        val renk = if (p.gunduz) android.graphics.Color.argb(56, 40, 60, 100) else android.graphics.Color.argb(77, 150, 180, 240)
-        dolgu.shader = LinearGradient(568f, 0f, 768f, 0f, intArrayOf(renk and 0x00FFFFFF, renk, renk and 0x00FFFFFF), floatArrayOf(0f, 0.2f, 1f), Shader.TileMode.CLAMP)
-        var y = 421f + 11f
-        while (y < 421f + 157f) {
-            c.drawRect(568f, y, 768f, y + 1f, dolgu)
-            y += 12f
-        }
-        dolgu.shader = null
-    }
-
     // --- Y-3 speed arc: circle centre (384, 884), r 720, 0–180 km/h over ±27.28° ---
 
     private const val YAY_CX = 384f
