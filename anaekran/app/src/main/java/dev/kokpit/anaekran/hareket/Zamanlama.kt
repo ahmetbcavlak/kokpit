@@ -118,9 +118,9 @@ object Zamanlama {
     }
 
     /**
-     * Hardware layer for the animation's span, for a measured view only (View.buildLayer on a
-     * 0-size view only logs "Incorrectly called buildLayer"). The previous layer type comes back
-     * at the end or on cancel.
+     * Hardware layer for the animation's span, for a measured view only. The layer is built on
+     * the next draw (no synchronous buildLayer on the UI thread, İ-F2 K-3). The previous layer
+     * type comes back at the end or on cancel.
      */
     private fun Animator.katmanli(v: View) {
         addListener(object : AnimatorListenerAdapter() {
@@ -132,7 +132,6 @@ object Zamanlama {
                 onceki = v.layerType
                 acik = true
                 v.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                if (v.isAttachedToWindow) v.buildLayer()
             }
 
             override fun onAnimationEnd(animation: Animator) {

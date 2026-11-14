@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import dev.kokpit.anaekran.arayuz.AltCubuk
 import dev.kokpit.anaekran.arayuz.Arkaplan
+import dev.kokpit.anaekran.arayuz.Gorseller
 import dev.kokpit.anaekran.ekran.Ekran
 import dev.kokpit.anaekran.ekran.SurusEkrani
 import dev.kokpit.anaekran.hareket.HareketTestYardim
@@ -62,9 +63,11 @@ class SurusBaglamaTest {
         Settings.Secure.putString(app.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, "dev.kokpit.anaekran/.veri.KapiServisi")
     }
 
+    private var yokEdildi = false
+
     @After
     fun kapat() {
-        if (::c.isInitialized) c.pause().stop().destroy()
+        if (::c.isInitialized && !yokEdildi) c.pause().stop().destroy()
         ShadowChoreographer.setPaused(false)
         Tema.zorla(null)
         AracVerisi.sifirla()
@@ -188,6 +191,94 @@ class SurusBaglamaTest {
         assertTrue(s.hazir)
         assertEquals(View.VISIBLE, s.visibility)
         assertEquals(dev.kokpit.anaekran.R.drawable.boya_gece, sahneResmi)
+    }
+
+    // --- İ-F2 ---
+
+    private val R_ARAC = setOf(
+        dev.kokpit.anaekran.R.drawable.sahne_surus, dev.kokpit.anaekran.R.drawable.sahne_surus_gunduz,
+        dev.kokpit.anaekran.R.drawable.sahne_park, dev.kokpit.anaekran.R.drawable.sahne_park_gunduz,
+    )
+
+    /** Some full, opaque picture of the car is on screen: the moving scene, a cover, or the scene picture. */
+    private fun aracVar(): Boolean {
+        if (s.visibility == View.VISIBLE) return true
+        val v = a.katmanlar.video
+        for (i in 0 until v.childCount) {
+            val c = v.getChildAt(i)
+            if (c is android.widget.ImageView && c.visibility == View.VISIBLE && c.alpha >= 0.999f && c.drawable != null) return true
+        }
+        val r = a.sahneResmi
+        return r in R_ARAC && a.katmanlar.sahne.visibility == View.VISIBLE && Gorseller.hazirMi(r)
+    }
+
+    private fun geceSurusteSahne() {
+        c = TestYardim.acVeGec()
+        hal(HareketHali.SURUS)
+        TestYardim.gecisleriBitir()
+        assertTrue(a.surusGorunur)
+    }
+
+    @Test
+    fun safaktaGecisleGunduzAracina() { // Ö-1
+        geceSurusteSahne()
+        HareketTestYardim.gercekSure()
+        Tema.zorla(Palet.GUNDUZ)
+        assertTrue("geçiş başlamadı", a.hareket!!.oynatici!!.calisiyor)
+        assertEquals(View.INVISIBLE, s.visibility)
+        repeat(120) {
+            assertTrue("araçsız kare (adım $it)", aracVar())
+            HareketTestYardim.bekle(16)
+        }
+        assertFalse(a.hareket!!.oynatici!!.calisiyor)
+        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_surus_gunduz, a.sahneResmi)
+        assertTrue(aracVar())
+    }
+
+    @Test
+    fun bellekBosalincaOrtuBeklenir() { // Ö-2
+        geceSurusteSahne()
+        Gorseller.bosalt() // onTrimMemory
+        hal(HareketHali.PARK)
+        assertEquals(View.VISIBLE, s.visibility) // the moving car stays until the cover is decoded
+        assertTrue(aracVar())
+        TestYardim.bosalt()
+        assertEquals(View.INVISIBLE, s.visibility)
+        assertTrue("örtü yok", aracVar())
+        assertEquals(dev.kokpit.anaekran.R.raw.klip_surus_geri, TestYardim.oynaticilar.last().klip)
+        repeat(240) {
+            assertTrue("araçsız kare (adım $it)", aracVar())
+            TestYardim.bekle(16)
+        }
+        assertEquals(dev.kokpit.anaekran.R.drawable.sahne_park, a.sahneResmi)
+    }
+
+    @Test
+    fun duraklayincaHizDonukKalmaz() { // Ö-3
+        // A data hook that, like HizKaynagi, resets the smoother when GPS stops in onPause.
+        Baglayicilar.uret = { listOf(object : Baglayici { override fun dur() = Hiz.yumusatici.sifirla() }, TestYardim.sahteHareket()) }
+        geceSurusteSahne()
+        ornek(62f)
+        TestYardim.kareler(3)
+        assertEquals("62", surusEkrani.hizMetni.toString())
+        c.pause() // e.g. a dialog: our window stays visible
+        assertEquals("—", surusEkrani.hizMetni.toString())
+        c.resume()
+        ornek(62f)
+        TestYardim.kareler(3)
+        assertEquals("62", surusEkrani.hizMetni.toString())
+    }
+
+    @Test
+    fun yokEdilirkenTeshisSahneyiGostermez() { // K-1
+        geceSurusteSahne()
+        val sahne = s
+        a.katmanlar.kareHizi.performLongClick()
+        assertTrue(a.teshis.acik)
+        assertEquals(View.INVISIBLE, sahne.visibility)
+        c.pause().stop().destroy()
+        yokEdildi = true
+        assertEquals(View.INVISIBLE, sahne.visibility)
     }
 
     // --- 2. Single reader ---

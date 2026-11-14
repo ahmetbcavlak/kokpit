@@ -52,8 +52,10 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  *
  * Drive scene (0.2, step 3 wiring; see also [SurusSahnesi]):
  *  7. Create it once, after [kur]: `val sahne = hareket.surusSahnesi(activity)`. It is a
- *     full-screen, transparent view that takes no touches; the SURUS screen puts it as its
- *     BOTTOM child, under every HUD view (MATCH_PARENT). The bitmaps are decoded on the worker
+ *     full-screen, transparent view that takes no touches; MainActivity puts it in its own root
+ *     layer (`Katmanlar.surus`, MATCH_PARENT) between the scene picture and the video, under
+ *     every screen — not inside the SURUS screen, so a screen change or a panel never redraws it
+ *     inside a hardware layer (İ-M2 K7). The bitmaps are decoded on the worker
  *     thread right away (≈ 1.25 MB); keep the scene INVISIBLE until `sahne.hazirOlunca { … }`
  *     fires (before that it has no car). The frame-rate counter hears its motion by itself.
  *  8. Speed (veri/HizYumusatici, m/s, System.nanoTime timebase):

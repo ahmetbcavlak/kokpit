@@ -60,6 +60,7 @@ class EkranTest {
     @After
     fun kapat() {
         if (::c.isInitialized) c.pause().stop().destroy()
+        org.robolectric.shadows.ShadowChoreographer.setPaused(false)
         Tema.zorla(null)
         AracVerisi.sifirla()
         Olcek.kur(768)
@@ -205,6 +206,9 @@ class EkranTest {
     @Test
     fun klipSirasindaSahneGizli() {
         c = TestYardim.acVeGec()
+        // Timing test: with Robolectric's free-running Choreographer an idle() during the screen
+        // transition's animation moves the clock past the clip's 1.5 s first-frame limit.
+        dev.kokpit.anaekran.hareket.HareketTestYardim.gercekSure()
         assertEquals(View.VISIBLE, a.katmanlar.sahne.visibility)
         hal(HareketHali.SURUS)
         val o = TestYardim.oynaticilar.last()
@@ -214,7 +218,7 @@ class EkranTest {
         o.dinleyici!!.kareGeldi()
         assertEquals(View.INVISIBLE, a.katmanlar.sahne.visibility)
         o.dinleyici!!.bitti()
-        TestYardim.gecisleriBitir()
+        dev.kokpit.anaekran.hareket.HareketTestYardim.bekle(3500) // clip 2.13 s + 0.3 s hold + 0.6 s fade
         assertEquals(View.VISIBLE, a.katmanlar.sahne.visibility)
         assertFalse(a.hareket!!.oynatici!!.calisiyor)
     }

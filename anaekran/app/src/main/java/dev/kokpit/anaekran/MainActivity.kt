@@ -142,6 +142,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
 
     /** A clip / fade of the scene picture runs (started by [sahneGecisi], until its `bitti`). */
     private var sahneGecisiSuruyor = false
+
+    /** [sahneGecisi] waits for the still car's decode before hiding the drive scene. */
+    private var ortuBekleniyor = false
     private var sahneGecisNo = 0
 
     /** Between onResume and onPause. */
@@ -392,8 +395,28 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
      * layer covers it with the old picture) and again in `bitti` (wiring step 5); KESILDI starts
      * nothing. A visible drive scene is hidden first and the cover is the still car
      * (sahne_surus): the clip back to park starts on it, and so does any fade away from it.
+     *
+     * The cover must be on screen in the same turn the scene is hidden (İ-F2 Ö-2): if sahne_surus
+     * is not decoded (memory trimmed), the moving car stays until it is, then the change runs
+     * ([ORTU_BEKLEME_MS] at most, should the decode never call back).
      */
     private fun sahneGecisi(yeni: Int, klip: Klip?) {
+        if (surusGorunur && !Gorseller.hazirMi(R.drawable.sahne_surus)) {
+            val no = ++sahneGecisNo
+            sahneGecisiSuruyor = true
+            ortuBekleniyor = true
+            val devamEt = Runnable {
+                if (no != sahneGecisNo || !ortuBekleniyor) return@Runnable
+                ortuBekleniyor = false
+                sahneGecisiSuruyor = false
+                sahneGecisi(yeni, klip)
+                surusKatmaniniGuncelle()
+            }
+            Gorseller.al(resources, R.drawable.sahne_surus) { devamEt.run() }
+            ana.postDelayed(devamEt, ORTU_BEKLEME_MS)
+            return
+        }
+        ortuBekleniyor = false
         var eski = sahne.istenen
         if (surusGorunur) {
             surusGizle()
@@ -421,9 +444,13 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         sahne.goster(yeni)
     }
 
-    /** What the scene layer shows for [e] now: boya_gece under a visible drive scene. */
+    /**
+     * What the scene layer should show for [e] now: boya_gece under a visible drive scene at
+     * night. At dawn (palette already day, scene still visible) the day car, so [sahneyiGuncelle]
+     * starts the fade whose cover is the still night car (İ-F2 Ö-1).
+     */
     private fun istenenSahne(e: Ekran): Int =
-        if (e == Ekran.SURUS && surusGorunur) R.drawable.boya_gece else sahneKaynagi(e)
+        if (e == Ekran.SURUS && surusGorunur && !Tema.palet.gunduz) R.drawable.boya_gece else sahneKaynagi(e)
 
     /**
      * Shows or hides the drive scene by the rules in the class notes. Shown over the still car,
@@ -443,7 +470,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
                 s.visibility = View.VISIBLE
                 if (sahne.istenen != R.drawable.boya_gece) s.durgundanBasla()
                 sahne.goster(R.drawable.boya_gece)
-            } else if (!goster && surusGorunur) {
+                // The still car is the cover when the scene goes: keep it decoded (Ö-2).
+                Gorseller.al(resources, R.drawable.sahne_surus) {}
+            } else if (!goster && surusGorunur && !ortuBekleniyor) {
                 surusGizle()
                 if (ekranlar.gecerli == Ekran.SURUS) sahne.goster(sahneKaynagi(Ekran.SURUS))
             }
@@ -708,6 +737,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         }
         devam = true
         hizDongusunuGuncelle()
+        // onTrimMemory may have emptied the cache while away: the cover must be ready (Ö-2).
+        if (surusGorunur) Gorseller.al(resources, R.drawable.sahne_surus) {}
         // Settings may have changed while we were away (service switched on, permission given).
         ipuclariniYenile()
         ekranlar.veriDegisti(AracVerisi.durum)
@@ -718,6 +749,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         hizDongusunuGuncelle()
         Hiz.yumusatici.uyandir = null
         for (b in baglayicilar.asReversed()) b.dur()
+        // Paused but maybe still visible (a dialog, a translucent window): no frame moves the
+        // number any more and GPS has stopped (the smoother is reset), so show "—", not a frozen value (Ö-3).
+        surusEkrani?.durumGoster(Hiz.yumusatici.bilinmiyor, true)
         ana.removeCallbacks(dakika)
         super.onPause()
     }
@@ -725,6 +759,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     override fun onDestroy() {
         for (b in baglayicilar.asReversed()) b.birak()
         ana.removeCallbacksAndMessages(null)
+        // Closing the panel must not show the released drive scene again (K-1).
+        teshis.degisti = null
         teshis.kapat()
         Tema.birak(this)
         AracVerisi.birak(this)
@@ -775,5 +811,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
 
         /** Unknown/stale check while the loops are stopped. */
         private const val ETIKET_MS = 1000L
+
+        /** Longest wait for the still car's decode before a change away from the drive scene. */
+        private const val ORTU_BEKLEME_MS = 400L
     }
 }

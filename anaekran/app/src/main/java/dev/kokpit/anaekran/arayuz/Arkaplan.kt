@@ -89,4 +89,7 @@ object Gorseller {
     }
 
     fun bosalt() = onbellek.evictAll()
+
+    /** True when [id] is decoded and cached (al() would call back synchronously). */
+    fun hazirMi(id: Int): Boolean = onbellek.get(id) != null
 }
