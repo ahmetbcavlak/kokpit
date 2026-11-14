@@ -397,8 +397,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
      * (sahne_surus): the clip back to park starts on it, and so does any fade away from it.
      *
      * The cover must be on screen in the same turn the scene is hidden (İ-F2 Ö-2): if sahne_surus
-     * is not decoded (memory trimmed), the moving car stays until it is, then the change runs
-     * ([ORTU_BEKLEME_MS] at most, should the decode never call back).
+     * is not decoded (memory trimmed), the moving car stays until it is, then the change runs.
+     * Should the decode not call back, it retries every [ORTU_BEKLEME_MS] until the cover is
+     * decoded (the car rule holds: the scene is never hidden without a cover).
      */
     private fun sahneGecisi(yeni: Int, klip: Klip?) {
         if (surusGorunur && !Gorseller.hazirMi(R.drawable.sahne_surus)) {
@@ -406,6 +407,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             sahneGecisiSuruyor = true
             ortuBekleniyor = true
             val devamEt = Runnable {
+                if (isDestroyed) return@Runnable
                 if (no != sahneGecisNo || !ortuBekleniyor) return@Runnable
                 ortuBekleniyor = false
                 sahneGecisiSuruyor = false
@@ -759,6 +761,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     override fun onDestroy() {
         for (b in baglayicilar.asReversed()) b.birak()
         ana.removeCallbacksAndMessages(null)
+        // A pending cover decode (Gorseller callback) must not run a scene change any more.
+        ortuBekleniyor = false
+        sahneGecisNo++
         // Closing the panel must not show the released drive scene again (K-1).
         teshis.degisti = null
         teshis.kapat()
@@ -812,7 +817,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         /** Unknown/stale check while the loops are stopped. */
         private const val ETIKET_MS = 1000L
 
-        /** Longest wait for the still car's decode before a change away from the drive scene. */
+        /** Retry interval while waiting for the still car's decode before a change away from the drive scene. */
         private const val ORTU_BEKLEME_MS = 400L
     }
 }

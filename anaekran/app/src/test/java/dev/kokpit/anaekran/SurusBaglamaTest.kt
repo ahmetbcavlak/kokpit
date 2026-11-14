@@ -254,6 +254,20 @@ class SurusBaglamaTest {
     }
 
     @Test
+    fun yokEdilinceBekleyenOrtuGecisBaslatmaz() { // İ-F3
+        geceSurusteSahne()
+        Gorseller.bosalt()
+        hal(HareketHali.PARK) // waits for the still car's decode
+        assertEquals(View.VISIBLE, s.visibility)
+        val once = TestYardim.oynaticilar.size
+        c.pause().stop().destroy()
+        yokEdildi = true
+        TestYardim.bosalt() // the decode calls back on the destroyed activity
+        TestYardim.bekle(1000) // and the retry timer would fire
+        assertEquals(once, TestYardim.oynaticilar.size) // no clip / fade started
+    }
+
+    @Test
     fun duraklayincaHizDonukKalmaz() { // Ö-3
         // A data hook that, like HizKaynagi, resets the smoother when GPS stops in onPause.
         Baglayicilar.uret = { listOf(object : Baglayici { override fun dur() = Hiz.yumusatici.sifirla() }, TestYardim.sahteHareket()) }
