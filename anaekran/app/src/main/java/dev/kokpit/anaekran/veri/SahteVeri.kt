@@ -8,11 +8,12 @@ object SahteVeri {
 
     /** Parked at night: climate 21.5° auto, 14° outside, doors closed, standing still. */
     fun parkGece() = AracDurumu(
-        klima = klima215Oto, kapiAcik = false, bagajAcik = false, disSicaklik = 14.0, hiz = 0.0, hareketHali = HareketHali.PARK,
+        klima = klima215Oto, kapiAcik = false, bagajAcik = false, disSicaklik = 14.0, hiz = 0.0, hamHiz = 0f,
+        hareketHali = HareketHali.PARK,
     )
 
     /** Driving at 62 km/h. */
-    fun surus62() = parkGece().copy(hiz = 62.0, hareketHali = HareketHali.SURUS)
+    fun surus62() = parkGece().copy(hiz = 62.0, hamHiz = (62.0 / 3.6).toFloat(), hareketHali = HareketHali.SURUS)
 
     fun kapiAcik() = parkGece().copy(kapiAcik = true)
 
