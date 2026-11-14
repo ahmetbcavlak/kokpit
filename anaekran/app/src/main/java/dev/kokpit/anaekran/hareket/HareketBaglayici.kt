@@ -6,13 +6,14 @@ import android.widget.FrameLayout
 import dev.kokpit.anaekran.Baglayici
 import dev.kokpit.anaekran.Katmanlar
 import dev.kokpit.anaekran.ekran.Gecis
+import dev.kokpit.anaekran.hareket.surus.SurusSahnesi
 import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.Tema
 import dev.kokpit.anaekran.tema.TemaDinleyici
 
 /**
- * Motion subsystem: intro clip, park ↔ drive clips / cross-fades, screen transition and the
- * frame-rate counter. It does not read or change the scene layer, the screens or
+ * Motion subsystem: intro clip, park ↔ drive clips / cross-fades, screen transition, the drive
+ * scene (K-94/K-95) and the frame-rate counter. It does not read or change the scene layer, the screens or
  * MainActivity's state; the caller hands in pictures and reacts in `bitti`.
  *
  * Wiring (task 4):
@@ -23,11 +24,12 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  *  3. Intro, in onCreate after [kur] (replaces `acilisBitti`/`ACILIS_MS` and the placeholder's tap):
  *     `hareket.acilisiOynat(hedefId) { ekranlar.goster(Ekran.PARK) }` — `hedefId` is the
  *     picture the scene layer shows right after `bitti` (e.g. `SahneKatmani.kaynak(Ekran.PARK, gunduz)`).
- *     The 1.6 s are counted from this call. Taps: a transparent shield cuts on tap by itself;
+ *     Timing (K-93, [Zamanlama]): the clip's last frame is held 0.3 s after it ends (at least
+ *     clip length + 0.3 s from this call), then a 0.6 s smootherstep fade. Taps: a transparent shield cuts on tap by itself;
  *     route other taps (e.g. the ACILIS screen's click) to [kes] as well — repeated calls are harmless.
  *  4. Park ↔ drive, call BEFORE switching the screen/scene:
  *     night: `hareket.gecisOynat(Klip.SURUS, eskiId, yeniId) { … }` (back: `Klip.SURUS_GERI`);
- *     day (no day clip): `hareket.gecisOynat(null, eskiId, yeniId) { … }` — a plain 350 ms fade.
+ *     day (no day clip): `hareket.gecisOynat(null, eskiId, yeniId) { … }` — a plain 0.6 s fade.
  *     `eskiId` = the scene on screen now (shown at once as a cover, so the scene layer may switch
  *     immediately after the call), `yeniId` = the scene after the change.
  *  5. In every `bitti`, the scene layer must show the target by the time `bitti` returns: the
@@ -42,8 +44,42 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  *     removed (always before `bitti`, while the opaque target overlay covers the screen), in pairs.
  *     INVISIBLE, not GONE: the scene keeps its size and its bitmap. Can be set before or after [kur].
  *
- * The counter measures fps over the clip / fade / screen-transition spans these components
- * report (HareketIzci); nothing to wire for that.
+ * The counter measures fps over the clip / fade / screen-transition / drive-scene spans these
+ * components report (HareketIzci); nothing to wire for that.
+ *
+ * Drive scene (0.2, step 3 wiring; see also [SurusSahnesi]):
+ *  7. Create it once, after [kur]: `val sahne = hareket.surusSahnesi(activity)`. It is a
+ *     full-screen, transparent view that takes no touches; the SURUS screen puts it as its
+ *     BOTTOM child, under every HUD view (MATCH_PARENT). The bitmaps are decoded on the worker
+ *     thread right away (≈ 1.25 MB). The frame-rate counter hears its motion by itself.
+ *  8. Speed: `hareket.surusHizi(Hiz.yumusatici::deger, Hiz.yumusatici::durgun)` (veri/HizYumusatici,
+ *     m/s, System.nanoTime timebase). Call [surusUyandir] from `durumDegisti` (every data update) so
+ *     a stopped scene restarts at once; without it the scene still restarts within 250 ms (it polls
+ *     `durgun` while stopped).
+ *     ONE reader per frame: `deger` advances the smoother on every call, so the SURUS screen must
+ *     not call it as well. It takes the scene's value instead:
+ *     `hareket.surusKaresi { zamanNs, hizMs -> surusEkrani.hizGoster(hizMs * 3.6) }` (called after
+ *     every drawn frame; while the scene is still the last value holds; `Hiz.yumusatici.eskiMi(zamanNs)`
+ *     for the dim "gps" label may be read in the same callback, it does not move the spring).
+ *     The callback comes only while the scene runs. When it does not (day: scene INVISIBLE; while
+ *     `Klip.SURUS` plays; at a standstill the last value holds and is right), the screen reads
+ *     `deger` on its own frame loop instead — check `hareket.surus?.calisiyor`; never both.
+ *  9. Running: [basla]/[dur] (onResume/onPause, already wired as a Baglayici) start and stop it;
+ *     on top of that it runs only while it is visible (a GONE/INVISIBLE SURUS screen stops it).
+ *     Nothing else to call per frame.
+ * 10. Night only: the body and wheels are the night car. By day keep 0.1's static picture
+ *     (scene layer `sahne_surus_gunduz`) and leave the drive scene INVISIBLE.
+ * 11. Scene layer under it at night: `boya_gece` (no car — the scene draws the car). Park → drive
+ *     at night: keep the drive scene INVISIBLE while `Klip.SURUS` plays (the clip has its own
+ *     car), and in the clip's `bitti` switch the scene layer to `boya_gece`, make the drive
+ *     scene VISIBLE and call `sahne.durgundanBasla()`: at rest the scene equals the clip's last
+ *     frame (PSNR 36.5 dB against sahne_surus), then it picks up the real speed over 1 s.
+ *     Drive → park: hide the scene when `Klip.SURUS_GERI` starts (its poster is sahne_surus, the
+ *     same still car; at the switch the car is below 5 km/h, so nearly at rest).
+ * 12. Remove `Cizgiler.hizCizgileri` from SurusEkrani's drawing: the scene draws the speed lines
+ *     itself (with the speed-dependent opacity), otherwise they are doubled.
+ * 13. The SURUS screen's own layers may enter with `Zamanlama.giris(view, sira)`; the screen
+ *     change itself already uses the K-93 timings ([YumusakGecis], 1.1 s).
  */
 class HareketBaglayici(
     private val oynaticiUret: (Context) -> Oynatici = { DokuOynatici(it) },
@@ -69,6 +105,15 @@ class HareketBaglayici(
     var sayac: KareHiziSayaci? = null
         private set
 
+    /** The drive scene, once [surusSahnesi] created it. */
+    var surus: SurusSahnesi? = null
+        private set
+
+    private var surusHizi: ((Long) -> Float)? = null
+    private var surusDurgun: ((Long) -> Boolean)? = null
+    private var surusKaresi: ((Long, Float) -> Unit)? = null
+    private var calisiyor = false
+
     override fun kur(activity: Activity, katmanlar: Katmanlar) {
         val s = KareHiziSayaci(activity, kareKaynagi)
         s.temaUygula(Tema.palet)
@@ -88,7 +133,9 @@ class HareketBaglayici(
     }
 
     override fun basla() {
+        calisiyor = true
         sayac?.basla()
+        surus?.basla()
     }
 
     /**
@@ -97,10 +144,15 @@ class HareketBaglayici(
      * out of sight and the player releases the decoder by itself (Oynatici.Dinleyici.pencereGizlendi).
      */
     override fun dur() {
+        calisiyor = false
+        surus?.dur()
         sayac?.dur()
     }
 
     override fun birak() {
+        calisiyor = false
+        surus?.birak()
+        surus = null
         sayac?.dur()
         yumusakGecis.izci = null
         oynatici?.birak()
@@ -112,25 +164,34 @@ class HareketBaglayici(
     }
 
     /**
-     * Intro: `klip_giris` plays, the fade to [hedef] (350 ms, calm curve) starts 1.6 s after
-     * this call (or when the clip ends, if later); a tap cuts with a 150 ms fade.
+     * Intro: `klip_giris` (2.4 s) plays, its last frame is held 0.3 s, then a 0.6 s fade to
+     * [hedef] (K-93; at least clip length + 0.3 s after this call); a tap cuts with a 0.25 s fade.
      * [bitti] once: TAMAM, DOKUNULDU, ATLANDI (clip failed: faded straight to [hedef]) or KESILDI.
      */
     fun acilisiOynat(hedef: Goruntu, bitti: (KlipOynatici.Sonuc) -> Unit) {
-        gerekli().oynat(Klip.GIRIS, null, hedef, ACILIS_TUT_MS, ACILIS_GECIS_MS, dokunmaKalkani = true, bitti = bitti)
+        gerekli().oynat(
+            Klip.GIRIS, null, hedef, ACILIS_TUT_MS, ACILIS_GECIS_MS,
+            dokunmaKalkani = true, sonTutMs = Zamanlama.KLIP_SONU_TUT_MS, bitti = bitti,
+        )
     }
 
     /** [acilisiOynat] with a drawable resource id. */
     fun acilisiOynat(hedefId: Int, bitti: (KlipOynatici.Sonuc) -> Unit) = acilisiOynat(Goruntu.Kaynak(hedefId), bitti)
 
     /**
-     * Park ↔ drive. With a [klip]: plays it, fades to [yeni] in 200 ms as soon as it ends.
-     * Without: plain cross-fade [eski] → [yeni] in 350 ms. A call while another runs ends that
-     * one at once (its `bitti(KESILDI)`) and starts from its target.
+     * Park ↔ drive (K-93). With a [klip] (2.13 s): plays it, holds its last frame 0.3 s, fades
+     * to [yeni] in 0.6 s. Without: plain cross-fade [eski] → [yeni] in 0.6 s. A call while
+     * another runs ends that one at once (its `bitti(KESILDI)`) and starts from its target.
      */
     fun gecisOynat(klip: Klip?, eski: Goruntu?, yeni: Goruntu, bitti: (KlipOynatici.Sonuc) -> Unit) {
-        val ms = if (klip == null) DUZ_GECIS_MS else KLIP_GECIS_MS
-        gerekli().oynat(klip, eski, yeni, 0L, ms, dokunmaKalkani = false, bitti = bitti)
+        if (klip == null) {
+            gerekli().oynat(null, eski, yeni, 0L, DUZ_GECIS_MS, dokunmaKalkani = false, bitti = bitti)
+        } else {
+            gerekli().oynat(
+                klip, eski, yeni, Zamanlama.klipTutMs(klip), KLIP_GECIS_MS,
+                dokunmaKalkani = false, sonTutMs = Zamanlama.KLIP_SONU_TUT_MS, bitti = bitti,
+            )
+        }
     }
 
     /** [gecisOynat] with drawable resource ids. */
@@ -142,12 +203,56 @@ class HareketBaglayici(
         oynatici?.kes()
     }
 
+    /**
+     * The drive scene (wiring steps 7–13 above). Created on the first call and kept; its bitmaps
+     * start decoding at once. It runs between [basla] and [dur] while it is visible.
+     */
+    fun surusSahnesi(context: Context): SurusSahnesi = surus ?: SurusSahnesi(context, kareKaynagi).also {
+        it.izci = sayac
+        it.hizSaglayici = surusHizi
+        it.durgunSaglayici = surusDurgun
+        it.kareDinleyici = surusKaresi
+        it.varliklariYukle()
+        if (calisiyor) it.basla()
+        surus = it
+    }
+
+    /**
+     * Speed for the drive scene: [hiz] smoothed m/s for a frame time, [durgun] true when the
+     * smoother is at rest (normally `Hiz.yumusatici::deger` / `::durgun`). May be set before or
+     * after [surusSahnesi].
+     */
+    fun surusHizi(hiz: (Long) -> Float, durgun: (Long) -> Boolean) {
+        surusHizi = hiz
+        surusDurgun = durgun
+        surus?.let {
+            it.hizSaglayici = hiz
+            it.durgunSaglayici = durgun
+            it.uyandir()
+        }
+    }
+
+    /**
+     * Per-frame speed for the HUD, the same value the scene used ([SurusSahnesi.kareDinleyici]).
+     * May be set before or after [surusSahnesi].
+     */
+    fun surusKaresi(dinleyici: ((zamanNs: Long, hizMs: Float) -> Unit)?) {
+        surusKaresi = dinleyici
+        surus?.kareDinleyici = dinleyici
+    }
+
+    /** A new speed may have arrived (call on every GPS sample): a stopped drive scene restarts at once. */
+    fun surusUyandir() {
+        surus?.uyandir()
+    }
+
     private fun gerekli(): KlipOynatici = checkNotNull(oynatici) { "HareketBaglayici.kur() önce çağrılmalı" }
 
     companion object {
-        const val ACILIS_TUT_MS = 1600L
-        const val ACILIS_GECIS_MS = 350L
-        const val KLIP_GECIS_MS = 200L
-        const val DUZ_GECIS_MS = 350L
+        /** Intro hold from the call: clip length + 0.3 s (K-93). */
+        val ACILIS_TUT_MS: Long = Zamanlama.klipTutMs(Klip.GIRIS)
+        const val ACILIS_GECIS_MS = Zamanlama.SAHNE_GECIS_MS
+        const val KLIP_GECIS_MS = Zamanlama.SAHNE_GECIS_MS
+        const val DUZ_GECIS_MS = Zamanlama.SAHNE_GECIS_MS
     }
 }
