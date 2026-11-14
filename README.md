@@ -20,13 +20,15 @@ Sürüm: 0.7.1 · 145 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüy
 
 **[▶ Kokpit Ana Ekran'ı indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-anaekran.apk)**
 
-Sürüm: 0.1.1 · 803 KB · Keşif'in yanına ayrı bir uygulama olarak kurulur ("Kokpit"); Keşif silinmez. Araçta Keşif denemelerinden **sonra** dene (K-73).
+Sürüm: 0.2.0 · 978 KB · Keşif'in yanına ayrı bir uygulama olarak kurulur ("Kokpit"); Keşif silinmez. Araçta Keşif denemelerinden **sonra** dene (K-73).
 
 1. Ekranın tarayıcısında bu sayfayı açıp yukarıdaki bağlantıya dokun. İnince "Yükle"ye dokun.
 2. Kokpit'i aç. Konum izni sorulursa **İzin ver** (hız GPS'ten gelir).
 3. Bir kez: Ayarlar > Erişilebilirlik > **Kokpit kapı uyarısı** > Aç. Yalnız üreticinin kapı/bagaj penceresindeki yazıyı okur; hiçbir şeye dokunmaz, hiçbir şey göndermez.
 
 Sonraki sürümler bunun **üzerine** kurulur (kaldırma): kaldırıp kurmak kapı uyarısı servisini kapatır.
+
+0.2.0: daha sakin geçişler (yeni klipler, arayüz 0,8 sn'de belirir); gece sürüşünde araç gerçekten gidiyor görünür (dönen tekerlek, akan şerit, uzak ışıklar, lamba yansıması, hafif süspansiyon, kamera); GPS hızı yumuşatılır (getSpeed; 5 sn sinyal yoksa "gps" soluk, 60 sn'de "—"). 0.1.1'in üzerine kurulur.
 
 0.1.1: klima sıcaklığı "23.0℃" biçiminde geldiğinde de görünür; motor kapalıyken ("0.0℃") "—" gösterilir. 0.1.0'ın üzerine kurulur.
 
