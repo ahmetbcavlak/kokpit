@@ -1,5 +1,6 @@
 package dev.kokpit.anaekran.ekran
 
+import android.animation.Animator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
@@ -19,6 +20,7 @@ import dev.kokpit.anaekran.arayuz.SahneKatmani
 import dev.kokpit.anaekran.arayuz.metin
 import dev.kokpit.anaekran.arayuz.renkle
 import dev.kokpit.anaekran.arayuz.yaz
+import dev.kokpit.anaekran.hareket.Zamanlama
 import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.Yazi
 import dev.kokpit.anaekran.veri.AracDurumu
@@ -51,6 +53,11 @@ import dev.kokpit.anaekran.veri.Teshis
  *
  * Nothing here is clickable except the confirmation (tap to dismiss) and the long-press targets
  * (card, park title): touches elsewhere fall through.
+ *
+ * Entrance (K-93, Zamanlama.giris): when what is shown changes, the newly shown pieces come in
+ * with the calm interface timing — 0.8 s alpha, 0.9 s rise, after 0.2 s (the title's second line
+ * 0.25 s). Leaf pieces only (the card, the title lines; the "closed" veil without a rise); this
+ * layer itself never gets an alpha. A data update that keeps the same look does not restart it.
  */
 @SuppressLint("ViewConstructor")
 class UyariKatmani(
@@ -109,6 +116,9 @@ class UyariKatmani(
 
     private val kapandiBitti = Runnable { kapandiyiBitir() }
     private var kapandiMetni = 0
+
+    /** Running entrance animations (ended at once when the look changes again). */
+    private val girisler = ArrayList<Animator>(2)
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -192,7 +202,24 @@ class UyariKatmani(
         val once = gorunum
         val onceSusturuldu = susturuldu
         yenileIc()
+        if (gorunum != once) girisBaslat(gorunum)
         if (gorunum != once || susturuldu != onceSusturuldu) degisti?.invoke(gorunum)
+    }
+
+    private fun girisBaslat(g: Gorunum) {
+        for (a in girisler) Zamanlama.bitir(a)
+        girisler.clear()
+        when (g) {
+            Gorunum.KART, Gorunum.KAPANDI_KART -> girisler += Zamanlama.giris(kart, 0)
+            Gorunum.PARK_BASLIGI -> {
+                girisler += Zamanlama.giris(parkBaslik, 0)
+                girisler += Zamanlama.giris(parkAlt, 1)
+            }
+            // The veil covers the screen: alpha only, a 6 px rise would uncover a strip.
+            Gorunum.KAPANDI_PARK -> girisler += Zamanlama.giris(kapandi, 0, 0f)
+            Gorunum.YOK -> Unit
+        }
+        for (a in girisler) a.start()
     }
 
     private fun yenileIc() {
@@ -291,6 +318,16 @@ class UyariKatmani(
         kapandi.setBackgroundColor(Color.argb(115, Color.red(p.bg), Color.green(p.bg), Color.blue(p.bg)))
         yenile()
     }
+
+    override fun onDetachedFromWindow() {
+        for (a in girisler) Zamanlama.bitir(a)
+        girisler.clear()
+        removeCallbacks(kapandiBitti)
+        super.onDetachedFromWindow()
+    }
+
+    /** The Y-14 card (tests: its entrance). */
+    internal val kartGorunumu: android.view.View get() = kart
 
     /** Texts on screen (tests). */
     internal val metinler: List<CharSequence>

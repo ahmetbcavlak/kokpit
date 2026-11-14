@@ -27,7 +27,9 @@ import dev.kokpit.anaekran.ekran.AcilisEkrani
 import dev.kokpit.anaekran.ekran.Ekran
 import dev.kokpit.anaekran.ekran.EkranDinleyici
 import dev.kokpit.anaekran.ekran.EkranGorunumu
+import dev.kokpit.anaekran.ekran.EkranKabi
 import dev.kokpit.anaekran.ekran.EkranYoneticisi
+import dev.kokpit.anaekran.ekran.HizDongusu
 import dev.kokpit.anaekran.ekran.Ipucu
 import dev.kokpit.anaekran.ekran.Ipuclari
 import dev.kokpit.anaekran.ekran.KlimaPaneli
@@ -40,6 +42,10 @@ import dev.kokpit.anaekran.hareket.Goruntu
 import dev.kokpit.anaekran.hareket.HareketBaglayici
 import dev.kokpit.anaekran.hareket.Klip
 import dev.kokpit.anaekran.hareket.KlipOynatici
+import dev.kokpit.anaekran.hareket.YumusakGecis
+import dev.kokpit.anaekran.hareket.Zamanlama
+import dev.kokpit.anaekran.hareket.surus.KareDinleyici
+import dev.kokpit.anaekran.hareket.surus.SurusSahnesi
 import dev.kokpit.anaekran.tema.Gunes
 import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.SonKonum
@@ -52,6 +58,7 @@ import dev.kokpit.anaekran.veri.AracDurumu
 import dev.kokpit.anaekran.veri.AracVerisi
 import dev.kokpit.anaekran.veri.ErisilebilirlikDurumu
 import dev.kokpit.anaekran.veri.HareketHali
+import dev.kokpit.anaekran.veri.Hiz
 import dev.kokpit.anaekran.veri.KapiServisi
 import dev.kokpit.anaekran.veri.Teshis
 import dev.kokpit.anaekran.veri.VeriBaglayici
@@ -63,8 +70,9 @@ import dev.kokpit.anaekran.veri.VeriBaglayici
  * Taps and one long press only — no swipe or edge gesture anywhere (K-66).
  *
  * Screen flow:
- *  - intro (ACILIS, Y-1) over klip_giris → after 1.6 s a fade to the PARK scene (SURUS if the
- *    data already says driving); a tap cuts it;
+ *  - intro (ACILIS, Y-1) over klip_giris (2.4 s) → its last frame held 0.3 s, then a 0.6 s fade
+ *    to the PARK scene (SURUS if the data already says driving; K-93, timings in hareket/); a tap
+ *    cuts it;
  *  - `hareketHali` SURUS → drive screen, PARK → park screen; at night with the park↔drive clip,
  *    by day with a plain cross-fade; null → the screen stays. Only a CHANGE acts, so a speed
  *    update every second does not touch what the user opened;
@@ -72,6 +80,18 @@ import dev.kokpit.anaekran.veri.VeriBaglayici
  *    screen comes (the road needs the speed, and a passive panel has nothing to finish);
  *    when the car stops with a panel open, the panel stays and closing it lands on park;
  *  - door/boot: the warning layer (UyariKatmani) above whatever screen is in front.
+ *
+ * Drive scene (0.2, K-94/K-95; [surusKatmaniniGuncelle]): its own root layer between the scene
+ * picture and the video. Shown only at night, with the drive screen in front, once its bitmaps
+ * are ready, while no clip/fade of the scene picture runs and the diagnostics panel is closed;
+ * then the scene picture under it is boya_gece (the scene draws the car). Park → drive: hidden
+ * while klip_surus plays; in the clip's `bitti` it appears over the still car (sahne_surus) from
+ * rest (`durgundanBasla`) and the picture under it switches to boya_gece. Drive → park, a panel,
+ * day: hidden before the clip/fade starts, whose cover is the still car again.
+ *
+ * Speed digits and arc (K-96): one reader of the smoothed speed per frame — the drive scene's
+ * frame while it runs (HareketBaglayici.surusKaresi), otherwise the drive screen's own loop
+ * ([HizDongusu]); the test is `hareket.surus?.calisiyor`.
  */
 class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici, EkranDinleyici {
 
@@ -108,6 +128,52 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
 
     /** The park/drive state the screens follow (changes act, repeats do not). */
     private var uygulananHal: HareketHali? = null
+
+    /** The picture the scene layer shows / was last asked for (tests, diagnostics). */
+    val sahneResmi: Int get() = sahne.istenen
+
+    /** The drive scene (null without the motion hook). */
+    var surusSahnesi: SurusSahnesi? = null
+        private set
+
+    /** The drive scene is VISIBLE (and the scene picture under it is boya_gece). */
+    var surusGorunur = false
+        private set
+
+    /** A clip / fade of the scene picture runs (started by [sahneGecisi], until its `bitti`). */
+    private var sahneGecisiSuruyor = false
+    private var sahneGecisNo = 0
+
+    /** Between onResume and onPause. */
+    private var devam = false
+
+    /** The drive screen, once built (the speed goes straight to it every frame). */
+    private var surusEkrani: SurusEkrani? = null
+
+    /** Per-frame speed for the drive HUD, from whichever loop reads it (see the class notes). */
+    private val hudKaresi = KareDinleyici { t, v ->
+        val e = surusEkrani
+        if (e != null) {
+            val y = Hiz.yumusatici
+            e.hizGoster(v * MS_KMH, y.bilinmiyor, y.eskiMi(t))
+        }
+    }
+
+    /** The drive screen's own speed loop (when the drive scene does not run). */
+    lateinit var hizDongusu: HizDongusu
+        private set
+
+    /**
+     * Unknown/stale can change while both loops are stopped (parked: no frames): checked once a
+     * second while the drive screen is in front. Reads only the flags, never the spring.
+     */
+    private val hizEtiketi = object : Runnable {
+        override fun run() {
+            val y = Hiz.yumusatici
+            surusEkrani?.durumGoster(y.bilinmiyor, y.eskiMi(Baglayicilar.saat()))
+            ana.postDelayed(this, ETIKET_MS)
+        }
+    }
 
     /** Theme check + clock, once a minute while visible (never per second). */
     private val dakika = object : Runnable {
@@ -146,13 +212,35 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         AracVerisi.dinle(this)
         ekranlar.dinle(this)
 
+        hizDongusu = HizDongusu(
+            Baglayicilar.kareKaynagi, Baglayicilar.hiz, Baglayicilar.durgun,
+            { hareket?.surus?.calisiyor == true }, hudKaresi,
+        )
+        teshis.degisti = { surusKatmaniniGuncelle() }
+        katmanlar.ekran.gecisSuruyor = { (ekranlar.gecis as? YumusakGecis)?.suruyor ?: ekranlar.gecisSuruyor }
+
         for (b in baglayicilar) b.kur(this, katmanlar)
         hareket?.let {
             ekranlar.gecis = it.gecis
             // Wiring step 6: while the opaque video is on screen the scene layer is not drawn.
             it.videoGorunurlugu = { video -> sahneGorunur(!video) }
+            surusSahnesiniKur(it)
         }
         acilisiBaslat()
+    }
+
+    /**
+     * HareketBaglayici steps 7–8: the drive scene in its own root layer, INVISIBLE until
+     * [surusKatmaniniGuncelle] shows it; the same speed reader and HUD callback as the screen's loop.
+     */
+    private fun surusSahnesiniKur(h: HareketBaglayici) {
+        val s = h.surusSahnesi(this)
+        s.visibility = View.INVISIBLE
+        katmanlar.surus.addView(s, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        h.surusHizi(Baglayicilar.hiz, Baglayicilar.durgun)
+        h.surusKaresi(hudKaresi)
+        surusSahnesi = s
+        s.hazirOlunca = { surusKatmaniniGuncelle() }
     }
 
     private fun katmanlariKur(): Katmanlar {
@@ -165,12 +253,17 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         sahne = SahneKatmani(sahneGorunumu) { window.setBackgroundDrawable(null) }
         kok.addView(sahneGorunumu, tam)
 
+        // 1b. Drive scene (transparent; filled in onCreate after the motion hook's kur)
+        val surus = FrameLayout(this)
+        kok.addView(surus, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+
         // 2. Video (motion layer)
         val video = FrameLayout(this)
         kok.addView(video, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
-        // 3. Screen: full height (the intro draws its bottom line at y 944; other screens stop at 932)
-        val ekranKap = FrameLayout(this)
+        // 3. Screen: full height (the intro draws its bottom line at y 944; other screens stop at 932).
+        // Touches go to the screen in front only (E1).
+        val ekranKap = EkranKabi(this)
         kok.addView(ekranKap, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         // 4. Warnings
@@ -213,13 +306,13 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         kok.addView(teshis, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         val yonetici = EkranYoneticisi(ekranKap, ::ekranUret)
-        return Katmanlar(kok, sahneGorunumu, video, ekranKap, uyariKap, cubuk, kareHizi, yonetici)
+        return Katmanlar(kok, sahneGorunumu, surus, video, ekranKap, uyariKap, cubuk, kareHizi, yonetici)
     }
 
     private fun ekranUret(e: Ekran): EkranGorunumu = when (e) {
         Ekran.ACILIS -> AcilisEkrani(this) { hareket?.kes() }
         Ekran.PARK -> ParkEkrani(this, ::ipucuSec, ::ipucuDokunuldu)
-        Ekran.SURUS -> SurusEkrani(this) { VeriBaglayici.izinVar(this) }
+        Ekran.SURUS -> SurusEkrani(this) { VeriBaglayici.izinVar(this) }.also { surusEkrani = it }
         Ekran.KLIMA -> KlimaPaneli(this, kapat = { ekranlar.geri() }, pasif = { not.goster(getString(R.string.not_klima_pasif)) })
         Ekran.UYGULAMALAR -> UygulamalarEkrani(this) { uyg ->
             if (PaketAcici.ac(this, uyg.bilesen) != PaketAcici.Sonuc.ACILDI) {
@@ -295,18 +388,86 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     /**
      * Cross-fades the scene layer to [yeni]. The clip is used only when it really starts on the
      * picture on screen and ends on [yeni] (e.g. not from the boot-open picture), otherwise a
-     * plain 350 ms fade. The scene layer switches at once (the motion layer covers it with the
-     * old picture) and again in `bitti` (wiring step 5); KESILDI starts nothing.
+     * plain 0.6 s fade (K-93, HareketBaglayici). The scene layer switches at once (the motion
+     * layer covers it with the old picture) and again in `bitti` (wiring step 5); KESILDI starts
+     * nothing. A visible drive scene is hidden first and the cover is the still car
+     * (sahne_surus): the clip back to park starts on it, and so does any fade away from it.
      */
     private fun sahneGecisi(yeni: Int, klip: Klip?) {
-        val eski = sahne.istenen
-        if (yeni == eski) return
+        var eski = sahne.istenen
+        if (surusGorunur) {
+            surusGizle()
+            eski = R.drawable.sahne_surus
+        }
+        if (yeni == eski) {
+            sahne.goster(yeni)
+            return
+        }
         val h = hareket
         if (h != null && eski != 0 && !acilisSuruyor) {
             val k = klip?.takeIf { (it.poster as? Goruntu.Kaynak)?.id == eski && it.sonKare == yeni }
-            h.gecisOynat(k, eski, yeni) { s -> if (s != KlipOynatici.Sonuc.KESILDI) sahne.goster(yeni) }
+            val no = ++sahneGecisNo
+            sahneGecisiSuruyor = true
+            // The drive scene will need boya_gece under it at the end: decode it while the clip plays.
+            if (yeni == R.drawable.sahne_surus) Gorseller.al(resources, R.drawable.boya_gece) {}
+            h.gecisOynat(k, eski, yeni) { s ->
+                if (s != KlipOynatici.Sonuc.KESILDI) sahne.goster(yeni)
+                if (no == sahneGecisNo) {
+                    sahneGecisiSuruyor = false
+                    surusKatmaniniGuncelle()
+                }
+            }
         }
         sahne.goster(yeni)
+    }
+
+    /** What the scene layer shows for [e] now: boya_gece under a visible drive scene. */
+    private fun istenenSahne(e: Ekran): Int =
+        if (e == Ekran.SURUS && surusGorunur) R.drawable.boya_gece else sahneKaynagi(e)
+
+    /**
+     * Shows or hides the drive scene by the rules in the class notes. Shown over the still car,
+     * it starts from rest (its first frame equals the picture) and the picture under it becomes
+     * boya_gece in the same turn. Rule kept everywhere: scene hidden ⇒ the picture has the car.
+     * Leaving the drive screen and dusk hide it in [sahneGecisi] (the cover is the still car);
+     * what is left for here is the diagnostics panel, behind which the still car comes back.
+     * Re-checks the speed loop.
+     */
+    private fun surusKatmaniniGuncelle() {
+        val s = surusSahnesi
+        if (s != null) {
+            val goster = !Tema.palet.gunduz && !acilisSuruyor && !sahneGecisiSuruyor &&
+                ekranlar.gecerli == Ekran.SURUS && s.hazir && !teshis.acik
+            if (goster && !surusGorunur) {
+                surusGorunur = true
+                s.visibility = View.VISIBLE
+                if (sahne.istenen != R.drawable.boya_gece) s.durgundanBasla()
+                sahne.goster(R.drawable.boya_gece)
+            } else if (!goster && surusGorunur) {
+                surusGizle()
+                if (ekranlar.gecerli == Ekran.SURUS) sahne.goster(sahneKaynagi(Ekran.SURUS))
+            }
+        }
+        hizDongusunuGuncelle()
+    }
+
+    private fun surusGizle() {
+        surusGorunur = false
+        surusSahnesi?.visibility = View.INVISIBLE
+        hizDongusunuGuncelle()
+    }
+
+    /**
+     * The HUD's own loop runs only with the drive screen in front, resumed and not covered by the
+     * diagnostics; the once-a-second unknown/stale check likewise.
+     */
+    private fun hizDongusunuGuncelle() {
+        if (!::hizDongusu.isInitialized) return
+        val etkin = devam && ekranlar.gecerli == Ekran.SURUS && !teshis.acik
+        hizDongusu.etkin = etkin
+        hizDongusu.yenile()
+        ana.removeCallbacks(hizEtiketi)
+        if (etkin) hizEtiketi.run()
     }
 
     /**
@@ -324,7 +485,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         if (acilisSuruyor) return
         val g = ekranlar.gecerli ?: return
         if (g == Ekran.ACILIS) return
-        sahneGecisi(sahneKaynagi(g), null)
+        val yeni = istenenSahne(g)
+        if (yeni != sahne.istenen) sahneGecisi(yeni, null)
     }
 
     // --- Park / drive ---
@@ -407,7 +569,10 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         not.temaUygula(palet)
         uyari.temaUygula(palet)
         ekranlar.temaDegisti(palet)
+        // Picture first: at dusk it hides the drive scene and fades to the day car; at dawn the
+        // fade to the night car runs before the scene may show.
         sahneyiGuncelle()
+        surusKatmaniniGuncelle()
     }
 
     override fun ekranDegisti(eski: Ekran?, yeni: Ekran) {
@@ -416,12 +581,16 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         if (yeni == Ekran.ACILIS) {
             cubukKap.visibility = View.INVISIBLE
         } else if (cubukKap.visibility != View.VISIBLE) {
-            cubukKap.alpha = 0f
-            cubukKap.visibility = View.VISIBLE
-            cubukKap.animate().alpha(1f).setDuration(CUBUK_MS).withLayer().start()
+            // K-93 interface entrance, with the first screen (alpha only: a rise would lift the bar off the edge).
+            Zamanlama.giris(cubukKap, 0, 0f).start()
         }
         uyari.guncelle(AracVerisi.durum, yeni)
         isikGuncelle()
+        surusKatmaniniGuncelle()
+        if (yeni == Ekran.SURUS) {
+            // A still loop holds an old value: one frame from whichever reader runs.
+            hareket?.surusUyandir()
+        }
     }
 
     private fun uyariDegisti() {
@@ -479,8 +648,36 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             "Klip: ${olcum?.let { "${it.klip} · ilk kare ${it.ilkKareMs?.let { ms -> "$ms ms" } ?: "gelmedi"} · bırakma ${it.birakmaMs?.let { ms -> "$ms ms" } ?: "—"}" } ?: "ölçülmedi"}",
             "Kapı kayıtları: liste dışı pencere ${Teshis.listeDisiPencere} · zaman aşımıyla düşen ${Teshis.kapiZamanAsimi}",
             "Kare hızı sayacı: ${hareket?.sayac?.text ?: "—"}",
+            surusSatiri(),
+            hizSatiri(),
             "",
         ) + Teshis.satirlar()
+    }
+
+    /** Drive scene: state, 60/30 tempo (research decision 8), the panel's refresh rate. */
+    private fun surusSatiri(): String {
+        val s = surusSahnesi ?: return "Sürüş sahnesi: yok"
+        @Suppress("DEPRECATION") // Activity.getDisplay is API 30; the unit runs 27.
+        val hz = windowManager.defaultDisplay.refreshRate
+        val durum = when {
+            !s.hazir -> "yükleniyor"
+            !surusGorunur -> "gizli"
+            !s.calisiyor -> "görünür, durdu"
+            s.donguBekliyor -> "çalışıyor"
+            else -> "görünür, durgun"
+        }
+        val t = s.tempo
+        val tempo = if (t.yariHiz) "yarı hız (her 2. kare)" else "tam hız"
+        return "Sürüş sahnesi: $durum · tempo $tempo · yarıya iniş ${t.yariyaInisSayisi} · " +
+            "ekran ${String.format(java.util.Locale.ROOT, "%.1f", hz)} Hz · son hız ${String.format(java.util.Locale.ROOT, "%.1f", s.sonHizMs * MS_KMH)} km/sa"
+    }
+
+    /** Who reads the smoothed speed now (K-96 single reader). */
+    private fun hizSatiri(): String {
+        val sahneOkur = hareket?.surus?.calisiyor == true
+        val d = hizDongusu
+        return "Hız göstergesi: okuyan ${if (sahneOkur) "sürüş sahnesi" else "ekran döngüsü"} · ekran döngüsü " +
+            "${if (!d.etkin) "kapalı" else if (d.bekliyor) "çalışıyor" else "durgun"} · ${d.okumaSayisi} okuma"
     }
 
     private fun temaSatiri(): String {
@@ -504,12 +701,22 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         ana.removeCallbacks(dakika)
         dakika.run()
         for (b in baglayicilar) b.basla()
+        // One lambda wakes both readers; each one decides by itself whether it runs (step 8).
+        Hiz.yumusatici.uyandir = {
+            hareket?.surusUyandir()
+            hizDongusu.uyandir()
+        }
+        devam = true
+        hizDongusunuGuncelle()
         // Settings may have changed while we were away (service switched on, permission given).
         ipuclariniYenile()
         ekranlar.veriDegisti(AracVerisi.durum)
     }
 
     override fun onPause() {
+        devam = false
+        hizDongusunuGuncelle()
+        Hiz.yumusatici.uyandir = null
         for (b in baglayicilar.asReversed()) b.dur()
         ana.removeCallbacks(dakika)
         super.onPause()
@@ -562,6 +769,11 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     companion object {
         private const val KARE_HIZI_GENISLIK = 96
         private const val KARE_HIZI_YUKSEKLIK = 20
-        private const val CUBUK_MS = 220L
+
+        /** m/s → km/h. */
+        private const val MS_KMH = 3.6f
+
+        /** Unknown/stale check while the loops are stopped. */
+        private const val ETIKET_MS = 1000L
     }
 }

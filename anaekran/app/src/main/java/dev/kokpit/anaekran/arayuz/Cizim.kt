@@ -159,8 +159,11 @@ object Cizgiler {
     private fun nx(a: Double, r: Float) = YAY_CX + (r * sin(a)).toFloat()
     private fun ny(a: Double, r: Float) = YAY_CY - (r * cos(a)).toFloat()
 
-    /** Arc, ticks every 5 km/h (labels every 20), progress and dot for [hiz]; null = no progress. */
-    fun hizYayi(c: Canvas, p: Palet, hiz: Double?) {
+    /**
+     * The still part of the arc: the thin 0–180 arc, ticks every 5 km/h (long ones and labels
+     * every 20). Drawn once with the screen; the moving part is [hizYayiIlerleme].
+     */
+    fun hizYayiTaban(c: Canvas, p: Palet) {
         val basla = Math.toDegrees(-Math.PI / 2 - YAY_ACI).toFloat()
         val tarama = Math.toDegrees(2 * YAY_ACI).toFloat()
         c.drawArc(yayKutusu, basla, tarama, false, kalem(saydam(p.hud, 0.35f), 1f))
@@ -171,18 +174,28 @@ object Cizgiler {
         while (v <= YAY_EN_COK) {
             val a = aci(v.toDouble())
             val buyuk = v % 20 == 0
-            val dolu = hiz != null && v <= hiz
-            val renk = when {
-                dolu -> saydam(p.acc, 0.95f)
-                buyuk -> saydam(p.hud, 0.7f)
-                else -> saydam(p.hud, 0.4f)
-            }
             val dis = if (buyuk) 736f else 728f
-            c.drawLine(nx(a, 722f), ny(a, 722f), nx(a, dis), ny(a, dis), kalem(renk, 1.2f))
+            c.drawLine(nx(a, 722f), ny(a, 722f), nx(a, dis), ny(a, dis), kalem(saydam(p.hud, if (buyuk) 0.7f else 0.4f), 1.2f))
             if (buyuk) c.drawText(v.toString(), nx(a, 754f), ny(a, 754f) + 4f, yazi)
             v += 5
         }
-        if (hiz == null) return
+    }
+
+    /**
+     * The moving part for [hiz] km/h (smoothed, not rounded): the ticks up to it in the accent
+     * (over the still ones), the 2 px accent arc as a `drawArc` stroke (research decision 16:
+     * HWUI tessellates a stroked arc; a path or a fill would be a CPU texture per change) and
+     * the dot at its end. Y-3 (0.1) look; the 0.2 demo uses the same arc.
+     */
+    fun hizYayiIlerleme(c: Canvas, p: Palet, hiz: Double) {
+        var v = 0
+        while (v <= hiz && v <= YAY_EN_COK) {
+            val a = aci(v.toDouble())
+            val dis = if (v % 20 == 0) 736f else 728f
+            c.drawLine(nx(a, 722f), ny(a, 722f), nx(a, dis), ny(a, dis), kalem(saydam(p.acc, 0.95f), 1.2f))
+            v += 5
+        }
+        val basla = Math.toDegrees(-Math.PI / 2 - YAY_ACI).toFloat()
         val a = aci(hiz)
         c.drawArc(yayKutusu, basla, Math.toDegrees(a + YAY_ACI).toFloat(), false, kalem(p.acc, 2f))
         dolgu.shader = null

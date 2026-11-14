@@ -316,7 +316,11 @@ class EkranTest {
         val s = e.gorunum(Ekran.SURUS) as SurusEkrani
         assertEquals("—", s.hizMetni.toString())
         assertTrue(s.birimMetni.toString(), s.birimMetni.contains("bekleniyor") || s.birimMetni.contains("konum izni"))
+        // 0.2 (K-96): the number comes from the smoothed GPS speed, not from AracDurumu.hiz.
         AracVerisi.guncelle { hiz(61.6) }
+        assertEquals("—", s.hizMetni.toString())
+        dev.kokpit.anaekran.veri.Hiz.yumusatici.ornek(61.6f / 3.6f, TestYardim.simdiNs(), null)
+        TestYardim.kareler(2)
         assertEquals("62", s.hizMetni.toString())
         assertEquals("km/sa · gps", s.birimMetni.toString())
         assertFalse(metinler(Ekran.SURUS).any { it == "kapılar" || it == "bagaj" })

@@ -4,8 +4,13 @@ import android.app.Activity
 import android.widget.FrameLayout
 import android.widget.ImageView
 import dev.kokpit.anaekran.arayuz.AltCubuk
+import dev.kokpit.anaekran.ekran.EkranKabi
 import dev.kokpit.anaekran.ekran.EkranYoneticisi
 import dev.kokpit.anaekran.hareket.HareketBaglayici
+import dev.kokpit.anaekran.hareket.KareKaynagi
+import dev.kokpit.anaekran.hareket.surus.DurgunSaglayici
+import dev.kokpit.anaekran.hareket.surus.HizSaglayici
+import dev.kokpit.anaekran.veri.Hiz
 import dev.kokpit.anaekran.veri.VeriBaglayici
 
 /**
@@ -13,8 +18,8 @@ import dev.kokpit.anaekran.veri.VeriBaglayici
  *  - data (`veri/`, [VeriBaglayici]): climate broadcast, outside temperature, GPS speed and
  *    park/drive, door/boot accessibility service. Its sources write through `AracVerisi.guncelle { … }`.
  *  - motion (`hareket/`, [HareketBaglayici]): intro/transition clips in [Katmanlar.video],
- *    cross-fade over [Katmanlar.sahne], frame-rate counter in [Katmanlar.kareHizi], and the
- *    screen transition for [EkranYoneticisi.gecis].
+ *    cross-fade over [Katmanlar.sahne], the drive scene in [Katmanlar.surus], frame-rate counter
+ *    in [Katmanlar.kareHizi], and the screen transition for [EkranYoneticisi.gecis].
  *
  * Every method has an empty default; all calls arrive on the main thread.
  */
@@ -37,10 +42,20 @@ class Katmanlar(
     val kok: FrameLayout,
     /** 1. Scene picture (opaque, full screen). */
     val sahne: ImageView,
+    /**
+     * 1b. Drive scene (K-94/K-95, hareket.surus.SurusSahnesi): transparent, full screen, no
+     * touches. Its own layer, not inside the drive screen, so a screen change or an open panel
+     * never animates it inside a hardware layer; MainActivity shows it only at night on the drive
+     * screen once it is ready and no clip/fade runs (İ-M2 K7).
+     */
+    val surus: FrameLayout,
     /** 2. Video (the motion layer's TextureView and cross-fade pictures). */
     val video: FrameLayout,
-    /** 3. Active screen (EkranYoneticisi's container), full screen; screens keep y < 932 except the intro. */
-    val ekran: FrameLayout,
+    /**
+     * 3. Active screen (EkranYoneticisi's container), full screen; screens keep y < 932 except
+     * the intro. Touches go to the current screen only (E1: never to one fading out).
+     */
+    val ekran: EkranKabi,
     /** 4. Warnings: door/boot open, closed confirmation (ekran.UyariKatmani). */
     val uyari: FrameLayout,
     /** 5. Bottom bar. */
@@ -71,4 +86,20 @@ object Baglayicilar {
     var uret: () -> List<Baglayici> = ::varsayilan
 
     fun liste(): List<Baglayici> = uret()
+
+    /**
+     * The ONE per-frame reader of the smoothed speed (HizYumusatici.deger advances its spring on
+     * every call): handed to the drive scene and to the drive screen's own frame loop, never
+     * both on one frame (MainActivity, K-96). Tests wrap it to count the reads.
+     */
+    var hiz: HizSaglayici = HizSaglayici(Hiz.yumusatici::deger)
+
+    /** True when the smoothed speed is at rest (the loops may stop). */
+    var durgun: DurgunSaglayici = DurgunSaglayici(Hiz.yumusatici::durgun)
+
+    /** Frame source of the drive screen's own speed loop (tests step it by hand). */
+    var kareKaynagi: KareKaynagi = KareKaynagi.CHOREOGRAPHER
+
+    /** Clock in the frameTimeNanos timebase (System.nanoTime), for checks between frames. */
+    var saat: () -> Long = System::nanoTime
 }

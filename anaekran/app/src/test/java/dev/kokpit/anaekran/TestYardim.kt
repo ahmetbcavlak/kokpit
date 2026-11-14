@@ -17,6 +17,9 @@ import dev.kokpit.anaekran.ekran.Ipuclari
 import dev.kokpit.anaekran.hareket.HareketBaglayici
 import dev.kokpit.anaekran.hareket.KareKaynagi
 import dev.kokpit.anaekran.hareket.Oynatici
+import dev.kokpit.anaekran.hareket.surus.DurgunSaglayici
+import dev.kokpit.anaekran.hareket.surus.HizSaglayici
+import dev.kokpit.anaekran.veri.Hiz
 import org.robolectric.Robolectric
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
@@ -37,9 +40,49 @@ object TestYardim {
         Arkaplan.yurutucu = Executor { it.run() }
         dev.kokpit.anaekran.uygulama.UygulamaListesi.yurutucu = Executor { it.run() }
         oynaticilar.clear()
+        kareler.bekleyen.clear()
         Baglayicilar.uret = { listOf(sahteHareket()) }
+        Baglayicilar.kareKaynagi = kareler
+        Baglayicilar.hiz = HizSaglayici(Hiz.yumusatici::deger)
+        Baglayicilar.durgun = DurgunSaglayici(Hiz.yumusatici::durgun)
+        Baglayicilar.saat = ::simdiNs
+        Hiz.yumusatici.sifirla()
+        Hiz.yumusatici.uyandir = null
         Ipuclari.sifirla()
     }
+
+    /**
+     * The frame source of the drive scene, the frame-rate counter and the HUD's own loop in
+     * MainActivity tests: callbacks wait until [kare] delivers them (no Choreographer loop).
+     */
+    class SahteKareKaynagi : KareKaynagi {
+        val bekleyen = ArrayList<Choreographer.FrameCallback>()
+        override fun iste(cb: Choreographer.FrameCallback) { bekleyen += cb }
+        override fun birak(cb: Choreographer.FrameCallback) { bekleyen.remove(cb) }
+    }
+
+    val kareler = SahteKareKaynagi()
+
+    /**
+     * "Now" in the frameTimeNanos timebase for tests: Robolectric's looper clock (System.nanoTime
+     * is not faked), so idleFor/bekle move it like they move uptimeMillis.
+     */
+    fun simdiNs(): Long = android.os.SystemClock.uptimeMillis() * 1_000_000L
+
+    /**
+     * One VSYNC: the looper clock moves 16 ms, then every waiting callback gets that frame time
+     * ([simdiNs]). Returns the frame time.
+     */
+    fun kare(): Long {
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+        val t = simdiNs()
+        val l = kareler.bekleyen.toList()
+        kareler.bekleyen.clear()
+        l.forEach { it.doFrame(t) }
+        return t
+    }
+
+    fun kareler(n: Int) = repeat(n) { kare() }
 
     /** A player that never plays: KlipOynatici skips it after 1.5 s and fades. */
     class SahteOynatici(c: Context) : Oynatici {
@@ -56,10 +99,7 @@ object TestYardim {
 
     fun sahteHareket() = HareketBaglayici(
         oynaticiUret = { SahteOynatici(it).also { o -> oynaticilar += o } },
-        kareKaynagi = object : KareKaynagi {
-            override fun iste(cb: Choreographer.FrameCallback) {}
-            override fun birak(cb: Choreographer.FrameCallback) {}
-        },
+        kareKaynagi = kareler,
     )
 
     fun bosalt() = shadowOf(Looper.getMainLooper()).idle()

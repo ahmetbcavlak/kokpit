@@ -82,16 +82,26 @@ class TeshisPaneli(
 
     val acik: Boolean get() = visibility == VISIBLE
 
+    /**
+     * Told when the panel opens (true) or closes (false). MainActivity stops the drive scene and
+     * the speed loop while it is open: the 90 % panel covers them (see MainActivity).
+     */
+    var degisti: ((Boolean) -> Unit)? = null
+
     fun ac() {
         sifirlaDugmesi.setText(R.string.teshis_kapi_sifirla)
+        val once = acik
         visibility = VISIBLE
         removeCallbacks(yenile)
         yenile.run()
+        if (!once) degisti?.invoke(true)
     }
 
     fun kapat() {
         removeCallbacks(yenile)
+        val once = acik
         visibility = GONE
+        if (once) degisti?.invoke(false)
     }
 
     /** The text on screen (tests). */

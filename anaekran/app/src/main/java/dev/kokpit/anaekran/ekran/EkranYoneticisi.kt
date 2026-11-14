@@ -14,7 +14,9 @@ import java.util.EnumMap
  *
  * Order inside [goster], so everything that depends on the screen moves together:
  *  1. [gecisOncesi] (MainActivity: starts the scene cross-fade / clip BEFORE anything changes),
- *  2. the new view gets theme and data, [gecerli]/[temel] change,
+ *  2. the new view gets theme and data, [gecerli]/[temel] change, the new view comes to the
+ *     front of [kap] and, if [kap] is an [EkranKabi], becomes the only one that takes touches
+ *     (E1: the old one keeps fading for 1.1 s but never gets a tap),
  *  3. [gecis] starts (old fades out, new fades in), the new view's `gosterildi()`,
  *  4. listeners hear [EkranDinleyici.ekranDegisti] — at the START of the transition (bottom bar
  *     highlight, warning layer, light line follow at once),
@@ -75,6 +77,10 @@ class EkranYoneticisi(
         gecerli = e
         if (e.temel) temel = e
         val eskiGorunum = eski?.let { gorunumler[it] }
+        val v = yeni.gorunum
+        // On top of the screen fading out (bringToFront re-lays out the container: skip when it already is).
+        if (kap.indexOfChild(v) != kap.childCount - 1) v.bringToFront()
+        (kap as? EkranKabi)?.gecerli = v
         val no = ++gecisNo
         gecisSuruyor = true
         gecis.gec(eskiGorunum?.gorunum, yeni.gorunum) {
