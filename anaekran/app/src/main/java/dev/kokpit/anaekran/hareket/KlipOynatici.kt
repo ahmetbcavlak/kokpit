@@ -12,7 +12,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import dev.kokpit.anaekran.tema.Palet
@@ -36,12 +35,13 @@ import dev.kokpit.anaekran.tema.Palet
  *    first latched frame after RENDERING_START;
  *  - no first frame within [ILK_KARE_SINIR_MS] after the video view was added, or no cover
  *    at all within [ORTU_SINIR_MS]: the clip is skipped;
- *  - the fade starts when BOTH `tutMs` (since the call) have passed AND the clip has ended —
- *    a slow decoder therefore never gets cut before the car has arrived;
+ *  - the fade starts when `tutMs` (since the call) have passed AND the clip has ended AND its
+ *    last frame has been held `sonTutMs` after the end (K-93: clip length + 0.3 s, then a 0.6 s
+ *    fade; [Zamanlama]) — a slow decoder therefore never gets cut before the car has arrived;
  *  - on completion the TextureView keeps the last frame (no image swap, so no sharpness pop:
- *    the scenes differ from the last frames only by codec softness, PSNR ≈ 34–35 dB)
+ *    the scenes differ from the last frames only by codec softness, PSNR ≈ 34–35 dB, 0.2 clips)
  *    [cihazda doğrulanacak: MTK sürücüsü bitişte yüzeyi siyaha çevirmemeli];
- *  - [kes] (tap) fades from the current alpha in [KESME_MS];
+ *  - [kes] (tap) fades from the current alpha in [KESME_MS] (no hold);
  *  - player error or skip: the fade starts at once over the poster — never black;
  *  - our window goes out of sight (another app in front): the decoder is released at once
  *    and the run ends on its target without a fade (ATLANDI);
@@ -100,7 +100,7 @@ class KlipOynatici(
     private var ust: ImageView? = null
     private var kalkan: View? = null
 
-    private inner class Istek(val klip: Klip?, val gecisMs: Long, val bitti: (Sonuc) -> Unit) {
+    private inner class Istek(val klip: Klip?, val gecisMs: Long, val sonTutMs: Long, val bitti: (Sonuc) -> Unit) {
         val t0 = SystemClock.uptimeMillis()
         var hedef: Drawable? = null
         var hedefYok = false
@@ -110,6 +110,8 @@ class KlipOynatici(
         var videoGorundu = false
         var tutuldu = false
         var klipBitti = klip == null
+        /** The last frame has been held [sonTutMs] after the clip ended (true without a clip/hold). */
+        var sonTutuldu = klip == null || sonTutMs <= 0L
         var basladi = false
         var kareGeldi = false
         var solma = false
@@ -121,6 +123,7 @@ class KlipOynatici(
         var bittiCagrildi = false
 
         val tutBitti = Runnable { tutuldu = true; ilerle(this) }
+        val sonTutBitti = Runnable { sonTutuldu = true; ilerle(this) }
         val zamanAsimi = Runnable { atla(this, "ilk kare ${ILK_KARE_SINIR_MS} ms içinde gelmedi") }
         val ortuSiniri = Runnable { if (!videoEklendi) atla(this, "örtü/poster ${ORTU_SINIR_MS} ms içinde gelmedi") }
         val guvenlik = Runnable { atla(this, "klip bitmedi") }
@@ -135,8 +138,10 @@ class KlipOynatici(
      *   the scene layer right after this call. Null: nothing is covered until the poster
      *   arrives (for a plain fade: the scene layer below must keep the old picture until `bitti`).
      * @param hedef picture to end on (the caller's choice: night/day, which scene).
-     * @param tutMs minimum time from this call before the fade (intro: 1600).
-     * @param gecisMs fade length.
+     * @param tutMs minimum time from this call before the fade (K-93: clip length + 0.3 s).
+     * @param gecisMs fade length (K-93: 0.6 s).
+     * @param sonTutMs hold of the clip's last frame after OnCompletion before the fade (K-93: 0.3 s);
+     *   counted from the real end, so a late-starting decoder still shows its last frame that long.
      * @param dokunmaKalkani adds a transparent tap catcher above everything; a tap (DOWN+UP
      *   without movement, no edge gesture) calls [kes]. The caller may route taps to [kes] instead.
      * @param bitti called exactly once per call (unless [birak] comes first), on the main
@@ -150,6 +155,7 @@ class KlipOynatici(
         tutMs: Long,
         gecisMs: Long,
         dokunmaKalkani: Boolean = false,
+        sonTutMs: Long = 0L,
         bitti: (Sonuc) -> Unit,
     ) {
         // A KESILDI callback may start another run; end those too until nothing runs.
@@ -160,7 +166,7 @@ class KlipOynatici(
         }
         aktif?.let { temizle(it); aktif = null } // a caller looping on KESILDI: drop silently
 
-        val i = Istek(klip, gecisMs, bitti)
+        val i = Istek(klip, gecisMs, sonTutMs, bitti)
         aktif = i
         val o = ortuGorunumu()
         val u = ustGorunumu()
@@ -213,6 +219,7 @@ class KlipOynatici(
             i.sonuc = Sonuc.DOKUNULDU
             i.tutuldu = true
             i.klipBitti = true
+            i.sonTutuldu = true
             solmaBaslat(i, KESME_MS)
             return
         }
@@ -268,6 +275,7 @@ class KlipOynatici(
             i.klipBitti = true
             ana.removeCallbacks(i.guvenlik)
             if (!i.solma) izKapa(i) // the hold is static: not motion
+            if (!i.sonTutuldu && !i.solma) ana.postDelayed(i.sonTutBitti, i.sonTutMs)
             ilerle(i)
         }
 
@@ -330,6 +338,7 @@ class KlipOynatici(
         i.sonuc = Sonuc.ATLANDI
         i.tutuldu = true
         i.klipBitti = true
+        i.sonTutuldu = true
         // If the cover is still up the video is not visible: free the decoder now.
         if (ortu?.visibility == View.VISIBLE) videoyuBirak(i)
         solmaBaslat(i, i.gecisMs)
@@ -339,12 +348,13 @@ class KlipOynatici(
 
     private fun ilerle(i: Istek) {
         if (aktif !== i || i.solma) return
-        if (i.tutuldu && i.klipBitti) solmaBaslat(i, i.gecisMs)
+        if (i.tutuldu && i.klipBitti && i.sonTutuldu) solmaBaslat(i, i.gecisMs)
     }
 
     private fun solmaBaslat(i: Istek, ms: Long) {
         i.solma = true
         ana.removeCallbacks(i.tutBitti)
+        ana.removeCallbacks(i.sonTutBitti)
         ana.removeCallbacks(i.zamanAsimi)
         ana.removeCallbacks(i.ortuSiniri)
         ana.removeCallbacks(i.guvenlik)
@@ -414,6 +424,7 @@ class KlipOynatici(
 
     private fun temizle(i: Istek) {
         ana.removeCallbacks(i.tutBitti)
+        ana.removeCallbacks(i.sonTutBitti)
         ana.removeCallbacks(i.zamanAsimi)
         ana.removeCallbacks(i.ortuSiniri)
         ana.removeCallbacks(i.guvenlik)
@@ -546,8 +557,8 @@ class KlipOynatici(
         /** No opaque cover (old picture / poster) within this time → skip (the video never got added). */
         const val ORTU_SINIR_MS = 3000L
 
-        /** Tap cut. */
-        const val KESME_MS = 150L
+        /** Tap cut (K-93: fast, ~0.25 s). */
+        const val KESME_MS = Zamanlama.KESME_MS
 
         /** Target picture still not decoded when the fade should start → end without it. */
         const val HEDEF_SINIR_MS = 1000L
@@ -558,10 +569,10 @@ class KlipOynatici(
         /** Intro cover until the poster is decoded: the window colour (styles.xml ilk_kare). */
         val ACILIS_RENGI = Palet.GECE.bg
 
-        /** Calm, symmetric ease-in-out (sine-like) for the 350 ms scene fade. */
-        val SAKIN = PathInterpolator(0.37f, 0f, 0.63f, 1f)
+        /** Scene fade: smootherstep, like the clips' camera (K-93). */
+        val SAKIN = Zamanlama.SAHNE_EGRISI
 
         /** Tap: starts fast, lands soft (responds at once). */
-        val HIZLI = PathInterpolator(0f, 0f, 0.2f, 1f)
+        val HIZLI = Zamanlama.KESME_EGRISI
     }
 }

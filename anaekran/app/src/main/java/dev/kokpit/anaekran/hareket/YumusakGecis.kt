@@ -1,31 +1,35 @@
 package dev.kokpit.anaekran.hareket
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.AnimatorSet
 import android.view.View
-import android.view.animation.PathInterpolator
 import dev.kokpit.anaekran.arayuz.uf
 import dev.kokpit.anaekran.ekran.Gecis
 
 /**
- * Screen change: old view alpha 1 → 0, new view alpha 0 → 1 rising a few pixels, [sureMs]
- * (default 220 ms). Alpha and translation only, both run on hardware layers (withLayer():
- * screens are many overlapping views — glass, text — so a layer is both correct and cheap).
- * A view not measured yet (the first screen change, width or height 0) animates without a
- * layer: View.buildLayer on a 0-size view only logs "Incorrectly called buildLayer" and drops it.
+ * Screen change with the calm interface timings of K-93 ([Zamanlama]):
+ *  - old view: alpha 1 → 0 over 0.8 s, at once;
+ *  - new view: after 0.2 s, alpha 0 → 1 over 0.8 s and a rise of 6 design px over 0.9 s;
+ *  - curve `cubic-bezier(.4,0,.2,1)` (the 0.2 demo's); total 1.1 s.
+ * Alpha and translation only, each view on a hardware layer while it animates (screens are many
+ * overlapping views — glass, text — so a layer is both correct and cheap). A view not measured
+ * yet (first screen change) animates without a layer (see [Zamanlama.giris]).
  *
  * Contract (ekran.Gecis): at the end the old view is GONE with alpha 1 / translation 0 (ready
  * to be shown again), the new view is VISIBLE with alpha 1, and `bitti` is called exactly once.
- * A new [gec] while one runs first finishes the running one at once (animations cancelled,
- * end state applied, its `bitti` called), then starts — so rapid calls never leave a view
+ * A new [gec] while one runs first finishes the running one at once (animations ended, end
+ * state applied, its `bitti` called), then starts — so rapid calls never leave a view
  * half-faded, even if the caller ignores `bitti`. Main thread only.
  */
 class YumusakGecis(
-    private val sureMs: Long = SURE_MS,
-    /** Rise of the new view in device pixels (design 6 px). */
-    private val kayma: () -> Float = { uf(KAYMA_PX) },
+    /** Rise of the new view in device pixels (design [Zamanlama.ARAYUZ_KAYMA_PX] px). */
+    private val kayma: () -> Float = { uf(Zamanlama.ARAYUZ_KAYMA_PX) },
 ) : Gecis {
 
     private class Calisan(val eski: View?, val yeni: View, val bitti: () -> Unit) {
         var cagrildi = false
+        var anim: Animator? = null
     }
 
     private var calisan: Calisan? = null
@@ -44,31 +48,28 @@ class YumusakGecis(
         izci?.hareketBasladi()
 
         yeni.animate().cancel()
-        yeni.alpha = 0f
-        yeni.translationY = kayma()
-        yeni.visibility = View.VISIBLE
-
-        e?.let {
-            it.animate().cancel()
-            it.visibility = View.VISIBLE
-            it.animate().alpha(0f).setDuration(sureMs).setInterpolator(EGRI).katmanla(it).start()
-        }
-        yeni.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(sureMs)
-            .setInterpolator(EGRI)
-            .katmanla(yeni)
-            .withEndAction { if (calisan === c) tamamla(c) }
-            .start()
+        e?.animate()?.cancel()
+        e?.visibility = View.VISIBLE
+        val giris = Zamanlama.giris(yeni, 0, kayma())
+        val set = AnimatorSet()
+        if (e != null) set.playTogether(Zamanlama.cikis(e), giris) else set.play(giris)
+        set.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                if (calisan === c) tamamla(c)
+            }
+        })
+        c.anim = set
+        set.start()
     }
 
     /** Finishes [c] now: final state, `bitti` once. Safe to call twice. */
     private fun tamamla(c: Calisan) {
         if (calisan === c) calisan = null
         if (!c.cagrildi) izci?.hareketBitti()
-        c.yeni.animate().cancel()
-        c.eski?.animate()?.cancel()
+        // end() runs the listeners (layers off); calisan is already moved on, so ours is a no-op.
+        val a = c.anim
+        c.anim = null
+        Zamanlama.bitir(a)
         c.eski?.let {
             it.visibility = View.GONE
             it.alpha = 1f
@@ -83,15 +84,8 @@ class YumusakGecis(
         }
     }
 
-    /** withLayer() only for a measured view (the one condition, see the class notes). */
-    private fun android.view.ViewPropertyAnimator.katmanla(v: View) =
-        if (v.width > 0 && v.height > 0) withLayer() else this
-
     companion object {
-        const val SURE_MS = 220L
-        const val KAYMA_PX = 6
-
-        /** Standard ease (fast out, slow in): the new screen settles softly. */
-        val EGRI = PathInterpolator(0.4f, 0f, 0.2f, 1f)
+        /** Whole transition length (delay + the longer of alpha and rise): 1.1 s. */
+        val SURE_MS: Long = Zamanlama.girisSuresi(0)
     }
 }
