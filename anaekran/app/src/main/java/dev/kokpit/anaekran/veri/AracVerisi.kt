@@ -22,10 +22,9 @@ fun interface AracDinleyici {
  *
  * Listeners hear only a change of a VALUE. A write that repeats the same values updates the
  * per-field times silently (AC8227L: no screen work for a speed that did not change).
- * Exception by design (0.2): [AracDurumu.hamHizOrnekNs] is a value, so every GPS fix wakes the
- * listeners (≈ once a second while the fixes come).
  *
- * The smoothed speed for animation is not here: it lives in [Hiz.yumusatici] (frame loop, m/s).
+ * The smoothed speed for animation is not here: it lives in [Hiz.yumusatici] (frame loop, m/s), which
+ * wakes a stopped frame loop through its own callback ([HizYumusatici.uyandir]).
  */
 object AracVerisi {
 
@@ -84,8 +83,6 @@ object AracVerisi {
         fun bagajAcik(a: Boolean?) { sonuc = sonuc.copy(bagajAcik = a, bagajAcikZamani = simdi) }
         fun disSicaklik(c: Double?) { sonuc = sonuc.copy(disSicaklik = c, disSicaklikZamani = simdi) }
         fun hiz(kmh: Double?) { sonuc = sonuc.copy(hiz = kmh, hizZamani = simdi) }
-        /** Raw speed in m/s and its fix's arrival time (elapsedRealtimeNanos); see [AracDurumu.hamHiz]. */
-        fun hamHiz(ms: Float?, ornekNs: Long) { sonuc = sonuc.copy(hamHiz = ms, hamHizOrnekNs = ornekNs) }
         fun hareketHali(h: HareketHali?) { sonuc = sonuc.copy(hareketHali = h, hareketHaliZamani = simdi) }
 
         /**

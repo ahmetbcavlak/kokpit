@@ -167,25 +167,54 @@ class HizYumusaticiTest {
     // --- 2 s and 5 s rules ---
 
     @Test
-    fun ikiSaniyedeTahminBiter_besSaniyedeEski() {
+    fun tahminYarimSaniyedeSabitlenir_besSaniyedeEski_bilinmiyor() {
         val y = HizYumusatici()
         assertTrue("nothing yet", y.eski)
+        assertTrue(y.bilinmiyor)
         assertEquals(0f, y.deger(0), 0f)
         assertTrue(y.durgun(0))
         y.ornek(10f, sn(1.0), null)
+        assertFalse(y.bilinmiyor)
         y.ornek(12f, sn(2.0), null)
         assertFalse(y.eski)
-        assertEquals(13.0, y.hedef(sn(3.99)), 1e-6)
-        assertEquals("2 s without a sample: last value, no prediction", 12.0, y.hedef(sn(4.0)), 1e-6)
-        assertEquals(12.0, y.hedef(sn(30.0)), 1e-6)
+        assertEquals(13.0, y.hedef(sn(2.5)), 1e-6)
+        // No sample for a long time: the target stays at the predicted value (no return to the raw 12).
+        assertEquals(13.0, y.hedef(sn(4.0)), 1e-6)
+        assertEquals(13.0, y.hedef(sn(300.0)), 1e-6)
         val x = y.kareler(2.0, 6.9)
-        assertEquals(12f, x, 0.05f)
+        assertEquals(13f, x, 0.05f)
         assertFalse(y.eski)
         assertTrue("5 s without a sample", y.eskiMi(sn(7.01)))
-        assertEquals("the value stays", 12f, y.deger(sn(7.02)), 0.05f)
+        assertEquals("the value stays", 13f, y.deger(sn(7.02)), 0.05f)
         assertTrue(y.eski)
+        assertFalse("stale is not unknown", y.bilinmiyor)
         y.ornek(12f, sn(8.0), null)
         assertFalse(y.eski)
+        // 60 s silence (HizKaynagi calls unut): unknown, "—"; the next sample is shown at once.
+        y.unut()
+        assertTrue(y.bilinmiyor)
+        assertTrue(y.eski)
+        assertEquals(0f, y.deger(sn(70.0)), 0f)
+        y.ornek(20f, sn(71.0), null)
+        assertFalse(y.bilinmiyor)
+        assertEquals(20f, y.deger(sn(71.01)), 1e-4f)
+    }
+
+    @Test
+    fun frendeGpsKesilince_hizGeriYukselmez() {
+        val y = HizYumusatici()
+        val kmh68 = (68 / 3.6).toFloat()
+        val kmh36 = (36 / 3.6).toFloat()
+        for (s in 0..3) { y.ornek(kmh68, sn(s.toDouble()), null); y.kareler(s.toDouble(), s + 1.0 - 1e-6) }
+        y.ornek(kmh36, sn(4.0), null) // −8.9 m/s²; then the GPS is lost
+        var onceki = Float.MAX_VALUE
+        val son = y.kareler(4.0, 20.0) { t, x ->
+            assertTrue("rose again at $t: $x > $onceki", x <= onceki + 1e-5f)
+            onceki = x
+        }
+        val tahmin = kmh36 + y.sonIvme * 0.5f
+        assertEquals("held at the predicted value", tahmin, son, 0.05f)
+        assertTrue(son < kmh36)
     }
 
     // --- Zero mode ---
@@ -224,22 +253,94 @@ class HizYumusaticiTest {
         assertFalse(y.sifirda)
         assertEquals(0.8, y.hedef(sn(6.0)), 1e-6)
 
-        // With a speed accuracy the entry threshold is max(0.5, accuracy), the exit 0.3 above it.
+        // With a speed accuracy the exit threshold is 0.3 above max(0.5, min(accuracy, 1.5)).
         val d = HizYumusatici()
         d.ornek(5f, 0, 1.0f)
-        d.ornek(0.9f, sn(1.0), 1.0f)
-        d.ornek(0.95f, sn(2.0), 1.0f)
+        d.ornek(0.3f, sn(1.0), 1.0f) // parked noise with a poor accuracy still counts towards zero
+        d.ornek(0.2f, sn(2.0), 1.0f)
         assertTrue(d.sifirda)
         d.ornek(1.2f, sn(3.0), 1.0f) // below 1.3: stays
         assertTrue(d.sifirda)
         d.ornek(1.31f, sn(4.0), 1.0f)
         assertFalse(d.sifirda)
+        // A speed below its own accuracy cannot end zero mode (parked multipath).
+        val m = HizYumusatici()
+        m.ornek(0.2f, 0, null); m.ornek(0.2f, sn(1.0), null)
+        assertTrue(m.sifirda)
+        m.ornek(2.5f, sn(2.0), 3.0f)
+        assertTrue(m.sifirda)
+        m.ornek(2.5f, sn(3.0), 1.0f) // 2.5 ≥ 1.3 with a believable accuracy: out
+        assertFalse(m.sifirda)
         // A small accuracy never lowers the thresholds below 0.5 / 0.8.
         val k = HizYumusatici()
         k.ornek(5f, 0, 0.1f); k.ornek(0.45f, sn(1.0), 0.1f); k.ornek(0.45f, sn(2.0), 0.1f)
         assertTrue(k.sifirda)
         k.ornek(0.75f, sn(3.0), 0.1f)
         assertTrue(k.sifirda)
+    }
+
+    @Test
+    fun cokKotuDogruluk_surerkenSifirKipineSokmaz() {
+        // Review Ö1: speedAccuracy 20 at 60 km/h. The accuracy raises the threshold by at most 1.5 m/s.
+        val y = HizYumusatici()
+        y.ornek(16.7f, 0, null)
+        assertFalse(y.sifirda)
+        repeat(5) { y.ornek(16.7f, sn(1.0 + it), 20f) }
+        assertFalse(y.sifirda)
+        assertEquals(16.7, y.hedef(sn(6.0)), 1e-5)
+        // Even a slow car (1.6 m/s, walking-pace traffic) with accuracy 20 stays out of zero mode.
+        repeat(3) { y.ornek(1.6f, sn(7.0 + it), 20f) }
+        assertFalse(y.sifirda)
+    }
+
+    @Test
+    fun uyandir_yalnizDurgundanHarekete_bilinmeyenden_eskiden() {
+        val y = HizYumusatici()
+        var cagri = 0
+        y.uyandir = { cagri++ }
+        y.ornek(0.2f, 0, null) // unknown -> known (0): the "—" must turn into "0"
+        assertEquals(1, cagri)
+        // Parked noise at 10 Hz for 20 s: never wakes the loop.
+        y.deger(0)
+        for (i in 1..200) {
+            val t = i * S / 10
+            y.ornek(if (i % 2 == 0) 0.6f else 0.3f, t, 0.5f)
+            y.deger(t)
+        }
+        assertEquals(1, cagri)
+        assertTrue(y.durgun(20 * S))
+        // Pulling away: one wake, then steady driving samples do not wake again.
+        y.ornek(3f, sn(20.1), null)
+        assertEquals(2, cagri)
+        y.kareler(20.1, 21.0)
+        for (i in 1..20) { y.ornek(3f + i * 0.1f, sn(21.0 + i * 0.1), null); y.deger(sn(21.0 + i * 0.1)) }
+        assertEquals(2, cagri)
+        // Stale (> 5 s) -> fresh: wakes (the "gps" label brightens).
+        y.ornek(5f, sn(30.0), null)
+        assertEquals(3, cagri)
+        // unut on a known value wakes ("—"); on an unknown one it does not.
+        y.unut()
+        assertEquals(4, cagri)
+        y.unut()
+        assertEquals(4, cagri)
+        // sifirla (pause) never wakes.
+        y.ornek(5f, sn(40.0), null)
+        assertEquals(5, cagri)
+        y.sifirla()
+        assertEquals(5, cagri)
+    }
+
+    @Test
+    fun yirmiHz_ivmeYarimSaniyelikReferanstan() {
+        // 20 Hz, steady +2 m/s² (the 8-sample ring of the first version only reached 0.35 s back).
+        val y = HizYumusatici()
+        for (i in 0..60) {
+            val t = i * S / 20
+            y.ornek(5f + 2f * i / 20f, t, null)
+            if (i >= 10) assertEquals("i=$i", 2f, y.sonIvme, 1e-3f)
+            else assertEquals("i=$i: nothing 0.5 s old yet", 0f, y.sonIvme, 0f)
+        }
+        assertEquals(5.0 + 6.0 + 1.0, y.hedef(3 * S + S / 2), 1e-3) // 0.5 s ahead of the last sample
     }
 
     // --- Reset, bad input ---
@@ -251,6 +352,7 @@ class HizYumusaticiTest {
         y.kareler(0.0, 0.5)
         y.sifirla()
         assertTrue(y.eski)
+        assertTrue(y.bilinmiyor)
         assertNull(y.sonHam)
         assertTrue(y.sifirda)
         assertEquals(0f, y.deger(sn(10.0)), 0f)

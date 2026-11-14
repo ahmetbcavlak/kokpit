@@ -215,7 +215,7 @@ class HizTest {
     }
 
     @Test
-    fun hamHizVeOrnekZamani_herOrnekte_yumusaticiyaGider() {
+    fun hamHizYumusaticiyaVeTeshise_ayniHizDinleyiciyiUyandirmaz() {
         val y = HizYumusatici()
         val h = kaynak(y)
         var uyanma = 0
@@ -224,33 +224,50 @@ class HizTest {
         try {
             bekle(1000)
             val t1 = SystemClock.elapsedRealtimeNanos()
-            fix(konum(36.4))
-            assertEquals(36.0, AracVerisi.durum.hiz!!, 0.0) // rounded as in 0.1
-            assertEquals((36.4 / 3.6).toFloat(), AracVerisi.durum.hamHiz!!, 1e-5f) // not rounded, m/s
-            assertEquals(t1, AracVerisi.durum.hamHizOrnekNs) // arrival time
-            assertEquals((36.4 / 3.6).toFloat(), y.sonHam!!, 1e-5f)
+            fix(konum(7.4))
+            assertEquals(7.0, AracVerisi.durum.hiz!!, 0.0) // rounded as in 0.1 (5–10 km/h: no state change)
+            assertEquals((7.4 / 3.6).toFloat(), Teshis.hamHiz!!, 1e-5f) // not rounded, m/s
+            assertEquals((7.4 / 3.6).toFloat(), y.sonHam!!, 1e-5f)
+            assertEquals(y.sonHam!!.toDouble(), y.hedef(t1), 1e-6) // arrival time on the frame clock
             assertEquals(1, uyanma)
 
-            // Same speed again: the sample time moves, so listeners wake (≈ 1/s, accepted).
-            bekle(1000)
-            val t2 = SystemClock.elapsedRealtimeNanos()
-            fix(konum(36.4))
-            assertEquals(t2, AracVerisi.durum.hamHizOrnekNs)
-            assertEquals(2, uyanma)
-            // The smoother got the arrival on the frame clock: 2 s later it is past the prediction.
-            assertEquals(y.sonHam!!.toDouble(), y.hedef(t2 + 2_000_000_000L), 1e-6)
+            // Same rounded speed again, 10 fixes a second for 3 s: no listener wakes (0.1 rule kept).
+            repeat(30) { bekle(100); fix(konum(7.2)) }
+            assertEquals(1, uyanma)
+            assertEquals((7.2 / 3.6).toFloat(), y.sonHam!!, 1e-5f)
+            assertEquals(31, Teshis.konumSayisi)
 
-            // 5 s quiet: raw speed goes with the rounded one.
+            // 5 s quiet: the rounded speed goes (0.1), the smoother keeps its value and is stale.
             bekle(6000)
             assertNull(AracVerisi.durum.hiz)
-            assertNull(AracVerisi.durum.hamHiz)
-            assertEquals(t2, AracVerisi.durum.hamHizOrnekNs)
+            assertEquals(2, uyanma)
+            assertTrue(y.eskiMi(SystemClock.elapsedRealtimeNanos()))
+            assertFalse(y.bilinmiyor)
+            // 60 s quiet (same moment as the parked/driving state): the smoother forgets, "—".
+            bekle(55_000)
+            assertTrue(y.bilinmiyor)
         } finally {
             AracVerisi.birak(d)
             h.dur()
         }
-        // GPS stopped: the smoother forgets (the next value must be fresh).
         assertNull(y.sonHam)
+    }
+
+    @Test
+    fun durSonrasiGelenKonumYokSayilir() {
+        val y = HizYumusatici()
+        val h = kaynak(y)
+        bekle(1000); fix(konum(20.0))
+        // Posted from another thread, but GPS stops before the main thread runs it.
+        val t = Thread { h.onLocationChanged(konum(80.0)) }
+        t.start(); t.join()
+        h.dur()
+        shadowOf(Looper.getMainLooper()).idle()
+        // Delivered directly after dur() as well.
+        h.onLocationChanged(konum(90.0))
+        assertNull(AracVerisi.durum.hiz)
+        assertNull(y.sonHam)
+        assertEquals(1, Teshis.konumSayisi)
     }
 
     @Test
@@ -279,7 +296,7 @@ class HizTest {
         val t = Thread { h.onLocationChanged(konum(54.0)) }
         t.start(); t.join()
         assertNull(y.sonHam) // not touched off the main thread
-        assertNull(AracVerisi.durum.hamHiz)
+        assertNull(AracVerisi.durum.hiz)
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(15f, y.sonHam!!, 1e-5f)
         assertEquals(54.0, AracVerisi.durum.hiz!!, 0.0)

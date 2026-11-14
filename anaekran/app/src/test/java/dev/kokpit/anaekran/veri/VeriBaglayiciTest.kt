@@ -91,7 +91,7 @@ class VeriBaglayiciTest {
         })
         bosalt()
         assertEquals(12.5f, Hiz.yumusatici.sonHam!!, 0f)
-        assertEquals(12.5f, AracVerisi.durum.hamHiz!!, 0f)
+        assertEquals(12.5f, Teshis.hamHiz!!, 0f)
         b.dur()
         assertNull(Hiz.yumusatici.sonHam)
         assertEquals(0, shadowOf(lm).getLocationRequests(LocationManager.GPS_PROVIDER).size)
@@ -174,7 +174,7 @@ class VeriBaglayiciTest {
     }
 
     @Test
-    fun ayniGpsHiziBesKez_yuvarlakHizAyni_herOrnekUyandirir_eskimeDegerOlarakYazilir() {
+    fun ayniGpsHiziBesKez_dinleyiciUyanmaz_eskimeDegerOlarakYazilir() {
         shadowOf(uyg).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         shadowOf(lm).setProviderEnabled(LocationManager.GPS_PROVIDER, true)
         val h = HizKaynagi(lm, { true })
@@ -195,17 +195,11 @@ class VeriBaglayiciTest {
         val d = AracDinleyici { sayi++ }
         AracVerisi.dinle(d)
         try {
-            val zaman = AracVerisi.durum.hizZamani
             repeat(5) { fix(36.0) }
-            // 0.2: the raw stream carries each fix's arrival time as a value, so every fix wakes the
-            // listeners (accepted: about once a second while driving). The rounded speed is unchanged.
-            assertEquals(5, sayi)
-            assertEquals(36.0, AracVerisi.durum.hiz!!, 0.0)
-            assertTrue(AracVerisi.durum.hizZamani > zaman)
+            assertEquals(0, sayi)
             bekle(6000) // GPS quiet > 5 s: speed → null, written as a value change by the timer
             assertNull(AracVerisi.durum.hiz)
-            assertNull(AracVerisi.durum.hamHiz)
-            assertEquals(6, sayi)
+            assertEquals(1, sayi)
         } finally {
             AracVerisi.birak(d)
             h.dur()

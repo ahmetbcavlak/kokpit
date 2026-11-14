@@ -122,8 +122,9 @@ object Teshis {
     /** Smoother state; the smoother is main-thread state, and this text is built on the main thread. */
     private fun yumusatma(): String {
         val y = Hiz.yumusatici
+        if (y.bilinmiyor) return "yumuşatma: bilinmiyor"
         return "yumuşatma: ${if (y.sifirda) "sıfır kipi" else "ivme ${ondalik(y.sonIvme, 1)} m/sn²"}" +
-            (if (y.eski) " · eski" else "")
+            (if (y.eskiMi(System.nanoTime())) " · eski" else "")
     }
 
     /** Tests only. */

@@ -7,8 +7,8 @@ package dev.kokpit.anaekran.veri
  * the UI shows "—" and never guesses (a missing door signal is NOT "closed").
  *
  * Owner from task 2 on: the data agent may add fields here; keep them nullable with a time.
- * 0.2 adds the raw GPS stream ([AracDurumu.hamHiz], [AracDurumu.hamHizOrnekNs]); the smoothed speed for
- * animation is HizYumusatici (Hiz.yumusatici), outside this snapshot.
+ * 0.2: the speed number and the motion read the smoothed speed (HizYumusatici, Hiz.yumusatici), which is
+ * outside this snapshot on purpose: a per-sample value here would wake every listener on every GPS fix.
  */
 
 /** Set temperature: a number or one of the unit's end stops. */
@@ -70,18 +70,6 @@ data class AracDurumu(
     /** Speed in km/h, source: GPS (LocationManager). null when the last fix with speed is older than 5 s. */
     val hiz: Double? = null,
     val hizZamani: Long = 0L,
-    /**
-     * Raw GPS speed in m/s (Location.getSpeed(), not rounded, ≥ 0), written on every fix with a speed;
-     * null with [hiz] (fix older than 5 s, GPS stopped). Screens animate with HizYumusatici (Hiz.yumusatici),
-     * not with this value; it is here for anything that needs the plain sample.
-     */
-    val hamHiz: Float? = null,
-    /**
-     * Arrival time of that fix, SystemClock.elapsedRealtimeNanos() (0 = never). On Oreo the fix's own stamp
-     * is not the measurement time either (research decision 10), so the arrival is used. Part of the VALUE,
-     * not an update time: every fix is a change, so listeners wake once per fix while it comes (≈ 1/s, accepted).
-     */
-    val hamHizOrnekNs: Long = 0L,
     /** Parked/driving from the GPS speed; kept through short GPS gaps (tunnels), see HizKaynagi. */
     val hareketHali: HareketHali? = null,
     val hareketHaliZamani: Long = 0L,

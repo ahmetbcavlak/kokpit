@@ -151,9 +151,10 @@ object KlimaCozucu {
     /**
      * The only accepted number text: optional sign, digits, optionally a dot or comma and digits
      * ("23", "-4", "23.0", "23,5"). Rejects what toDouble() would also take: "1e1", "23d", "0x1.8p4",
-     * "NaN", "Infinity", ".5", "5." (0.1.1 review).
+     * "NaN", "Infinity", ".5", "5." (0.1.1 review). ASCII digits only: on Android (ICU regex) `\d` also
+     * matches other scripts' digits, which toDoubleOrNull would then misread or reject.
      */
-    private val SAYI_METNI = Regex("""^[+-]?\d+([.,]\d+)?$""")
+    private val SAYI_METNI = Regex("""^[+-]?[0-9]+([.,][0-9]+)?$""")
 
     /**
      * Int, Long, Float, Double or text. Text must match [SAYI_METNI] after trimming and is read with a dot
