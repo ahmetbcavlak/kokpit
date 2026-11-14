@@ -117,7 +117,9 @@ class AltCubukTest {
         TestYardim.uygulamaKur("org.a", "Ayarlar")
         TestYardim.uygulamaKur("org.c", "Çay")
         TestYardim.uygulamaKur("org.d", "Zeka")
-        c = TestYardim.ac()
+        // Cut the intro first: its bottom bar is hidden, and with the 0.2 timings the intro ends
+        // (and shows PARK) while the idle step below runs the 1.1 s screen transition.
+        c = TestYardim.acVeGec()
 
         val liste = UygulamaListesi.oku(a, 64).map { it.ad }
         assertFalse(liste.any { it == "Kokpit" })

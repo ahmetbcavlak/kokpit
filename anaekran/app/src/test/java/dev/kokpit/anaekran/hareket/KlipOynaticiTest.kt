@@ -187,10 +187,10 @@ class KlipOynaticiTest {
         bekle(300)
         k.kes()
         k.kes()
-        bekle(100)
+        bekle(150)
         assertEquals(View.VISIBLE, ust.visibility)
-        assertTrue("350 ms değil, 150 ms", sonuclar.isEmpty())
-        bekle(120)
+        assertTrue("600 ms değil, 250 ms", sonuclar.isEmpty())
+        bekle(150)
         assertEquals(listOf(Sonuc.DOKUNULDU), sonuclar)
         hepsiTemiz()
         o.dinleyici?.bitti() // late completion is ignored
@@ -213,7 +213,7 @@ class KlipOynaticiTest {
         // Tap.
         kalkan.dispatchTouchEvent(ev(MotionEvent.ACTION_DOWN, 300f, 500f))
         kalkan.dispatchTouchEvent(ev(MotionEvent.ACTION_UP, 301f, 501f))
-        bekle(300)
+        bekle(400)
         assertEquals(listOf(Sonuc.DOKUNULDU), sonuclar)
         hepsiTemiz()
     }
@@ -525,10 +525,107 @@ class KlipOynaticiTest {
         assertEquals(View.GONE, ust.visibility)
         teslim("k1001")
         assertEquals(View.VISIBLE, ust.visibility)
-        bekle(100)
+        bekle(150)
         assertTrue(sonuclar.isEmpty())
         bekle(150)
         assertEquals(listOf(Sonuc.DOKUNULDU), sonuclar)
         hepsiTemiz()
+    }
+
+    // --- K-93: clip length + 0.3 s hold, then 0.6 s ---
+
+    private fun acilis093() = k.oynat(
+        Klip.GIRIS, null, HEDEF, Zamanlama.klipTutMs(Klip.GIRIS), Zamanlama.SAHNE_GECIS_MS,
+        dokunmaKalkani = true, sonTutMs = Zamanlama.KLIP_SONU_TUT_MS, bitti = kaydet,
+    )
+
+    @Test
+    fun k93_acilis_klipSonrasi03TutSonra06Solar() {
+        val t0 = SystemClock.uptimeMillis()
+        acilis093()
+        val o = oynaticilar.single()
+        bekle(50)
+        o.ilkKare()
+        bekleKadar(t0, 2400)
+        o.dinleyici!!.bitti()
+        bekleKadar(t0, 2680)
+        assertEquals("0,3 sn son kare tutulur", View.GONE, ust.visibility)
+        bekleKadar(t0, 2730)
+        assertEquals("2,7 sn'de solma başladı", View.VISIBLE, ust.visibility)
+        bekleKadar(t0, 3000)
+        assertTrue("yavaş başlar (smootherstep)", ust.alpha in 0.05f..0.7f)
+        assertTrue(sonuclar.isEmpty())
+        bekleKadar(t0, 3250)
+        assertTrue("0,6 sn sürer", sonuclar.isEmpty())
+        bekleKadar(t0, 3400)
+        assertEquals(listOf(Sonuc.TAMAM), sonuclar)
+        hepsiTemiz()
+    }
+
+    @Test
+    fun k93_gecKalanKlipteTutmaGercekBitistenSayilir() {
+        val t0 = SystemClock.uptimeMillis()
+        acilis093()
+        val o = oynaticilar.single()
+        bekleKadar(t0, 600)
+        o.ilkKare()
+        bekleKadar(t0, 3000) // the decoder started late: the clip ends at 3.0 s
+        assertEquals(View.GONE, ust.visibility)
+        o.dinleyici!!.bitti()
+        bekleKadar(t0, 3280)
+        assertEquals("bitişten 0,3 sn", View.GONE, ust.visibility)
+        bekleKadar(t0, 3330)
+        assertEquals(View.VISIBLE, ust.visibility)
+        bekleKadar(t0, 4000)
+        assertEquals(listOf(Sonuc.TAMAM), sonuclar)
+    }
+
+    @Test
+    fun k93_tutmadaDokununcaHizliKeser() {
+        val t0 = SystemClock.uptimeMillis()
+        acilis093()
+        val o = oynaticilar.single()
+        o.ilkKare()
+        bekleKadar(t0, 2400)
+        o.dinleyici!!.bitti()
+        bekleKadar(t0, 2500) // inside the 0.3 s hold
+        k.kes()
+        assertEquals(View.VISIBLE, ust.visibility)
+        bekle(150)
+        assertTrue(sonuclar.isEmpty())
+        bekle(150)
+        assertEquals(listOf(Sonuc.DOKUNULDU), sonuclar)
+        hepsiTemiz()
+    }
+
+    @Test
+    fun k93_surusKlibi_213SonraTutVeSolma() {
+        val t0 = SystemClock.uptimeMillis()
+        k.oynat(
+            Klip.SURUS, ESKI, HEDEF, Zamanlama.klipTutMs(Klip.SURUS), Zamanlama.SAHNE_GECIS_MS,
+            sonTutMs = Zamanlama.KLIP_SONU_TUT_MS, bitti = kaydet,
+        )
+        val o = oynaticilar.single()
+        o.ilkKare()
+        bekleKadar(t0, 2133)
+        o.dinleyici!!.bitti()
+        bekleKadar(t0, 2400)
+        assertEquals(View.GONE, ust.visibility)
+        bekleKadar(t0, 2470)
+        assertEquals(View.VISIBLE, ust.visibility)
+        bekleKadar(t0, 3150)
+        assertEquals(listOf(Sonuc.TAMAM), sonuclar)
+        hepsiTemiz()
+    }
+
+    @Test
+    fun k93_hatadaTutmadanSolar() {
+        acilis093()
+        val o = oynaticilar.single()
+        o.dinleyici!!.hata("test")
+        bekle(20)
+        assertEquals(View.VISIBLE, ust.visibility)
+        bekle(650)
+        assertEquals(listOf(Sonuc.ATLANDI), sonuclar)
     }
 }

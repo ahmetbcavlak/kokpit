@@ -15,9 +15,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /** The Baglayici on the real layer tree of MainActivity (as task 4 will wire it). */
 @RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE) // real webp decoding for the drive scene's bitmaps
 @Config(sdk = [27], qualifiers = "w768dp-h1024dp-mdpi")
 class HareketBaglayiciTest {
 
@@ -81,6 +83,44 @@ class HareketBaglayiciTest {
         h.birak()
         assertTrue(oynaticilar.last().birakildi)
         assertEquals(0, k.video.childCount)
+        c.pause().stop().destroy()
+    }
+
+    @Test
+    fun surusSahnesi_olusturBaslaDurHiz() {
+        val c = TestYardim.ac()
+        val a = c.get()
+        val k = a.katmanlar
+        val kaynak = Kaynak()
+        val h = HareketBaglayici(oynaticiUret = { Oy(it) }, kareKaynagi = kaynak)
+        h.kur(a, k)
+        var hiz = 0f
+        h.surusHizi({ hiz }, { hiz == 0f })
+        var hudHizi = -1f
+        h.surusKaresi(dev.kokpit.anaekran.hareket.surus.KareDinleyici { _, v -> hudHizi = v })
+        val s = h.surusSahnesi(a)
+        assertSame(s, h.surusSahnesi(a))
+        TestYardim.bosalt() // bitmaps decoded (worker inline) and handed over
+        assertTrue(s.hazir)
+        assertSame(h.sayac, s.izci)
+        k.ekran.addView(s, android.widget.FrameLayout.LayoutParams(768, 1024))
+        TestYardim.bosalt()
+        h.basla()
+        assertTrue(s.calisiyor)
+        hiz = 12f
+        h.surusUyandir()
+        val t0 = 1_000_000_000L
+        repeat(3) { i ->
+            val l = kaynak.bekleyen.toList()
+            kaynak.bekleyen.clear()
+            l.forEach { it.doFrame(t0 + i * 16_666_667L) }
+        }
+        assertEquals(12f, hudHizi)
+        assertTrue(s.model.mesafe > 0.0)
+        h.dur()
+        assertTrue("dur: sahne ve sayaç kare istemez", kaynak.bekleyen.isEmpty())
+        h.birak()
+        assertEquals(null, h.surus)
         c.pause().stop().destroy()
     }
 }
