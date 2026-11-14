@@ -7,6 +7,8 @@ package dev.kokpit.anaekran.veri
  * the UI shows "—" and never guesses (a missing door signal is NOT "closed").
  *
  * Owner from task 2 on: the data agent may add fields here; keep them nullable with a time.
+ * 0.2: the speed number and the motion read the smoothed speed (HizYumusatici, Hiz.yumusatici), which is
+ * outside this snapshot on purpose: a per-sample value here would wake every listener on every GPS fix.
  */
 
 /** Set temperature: a number or one of the unit's end stops. */

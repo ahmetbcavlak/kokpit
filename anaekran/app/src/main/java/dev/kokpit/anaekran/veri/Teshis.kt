@@ -1,5 +1,7 @@
 package dev.kokpit.anaekran.veri
 
+import java.util.Locale
+
 /**
  * In-memory diagnostics of the data layer, for a hidden diagnostics line (task 4) and for the
  * first test on the car. Nothing here is written to a file or sent anywhere.
@@ -36,6 +38,14 @@ object Teshis {
     /** Fixes that came without a speed (hasSpeed() false); they do not move the hysteresis. */
     @Volatile var hizsizKonumSayisi: Int = 0
     @Volatile var sonKonumZamani: Long = 0L
+    /** Time between fixes as they really arrive (minTime 0: not assumed to be 1 Hz). */
+    val konumAraligi = OrnekAraligi()
+    /** Last raw speed, m/s (null before the first fix with speed). */
+    @Volatile var hamHiz: Float? = null
+    /** Last speed accuracy, m/s (hasSpeedAccuracy(), API 26+); null when the fix had none. */
+    @Volatile var hizDogrulugu: Float? = null
+    /** Fixes with speed that also carried a speed accuracy. */
+    @Volatile var dogrulukluKonumSayisi: Int = 0
 
     // --- Door service ---
     @Volatile var kapiServisiBagli: Boolean = false
@@ -66,6 +76,13 @@ object Teshis {
         sonKonumZamani = simdi()
     }
 
+    /** A fix with speed: raw m/s and its accuracy (null = not reported). */
+    fun hizGeldi(ms: Float, dogruluk: Float?) {
+        hamHiz = ms
+        hizDogrulugu = dogruluk
+        if (dogruluk != null) dogrulukluKonumSayisi++
+    }
+
     fun kapiOlayi(metin: String) {
         val satir = "${simdi()} $metin"
         synchronized(kapiOlaylari) {
@@ -92,8 +109,22 @@ object Teshis {
             "Dış sıcaklık ham: ${disSicaklikHam ?: "—"} · ${once(disSicaklikHamZamani)}",
             "GPS: $gps · izin ${when (konumIzni) { true -> "var"; false -> "yok"; null -> "?" }} · " +
                 "$konumSayisi konum ($hizsizKonumSayisi hızsız) · son ${once(sonKonumZamani)}",
+            "GPS aralığı: ${konumAraligi.ozet()}",
+            "GPS hız: ham ${hamHiz?.let { ondalik(it, 2) + " m/sn" } ?: "—"} · doğruluk " +
+                "${hizDogrulugu?.let { ondalik(it, 2) + " m/sn" } ?: "yok"} ($dogrulukluKonumSayisi konumda) · " +
+                yumusatma(),
             "Kapı servisi: ${if (kapiServisiBagli) "bağlı" else "bağlı değil"} · liste dışı pencere $listeDisiPencere · zaman aşımı $kapiZamanAsimi",
         ) + kapiOlaylari().takeLast(5).map { "  $it" } + listOfNotNull(sonHata?.let { "Hata: $it" })
+    }
+
+    private fun ondalik(f: Float, basamak: Int) = String.format(Locale.forLanguageTag("tr-TR"), "%.${basamak}f", f)
+
+    /** Smoother state; the smoother is main-thread state, and this text is built on the main thread. */
+    private fun yumusatma(): String {
+        val y = Hiz.yumusatici
+        if (y.bilinmiyor) return "yumuşatma: bilinmiyor"
+        return "yumuşatma: ${if (y.sifirda) "sıfır kipi" else "ivme ${ondalik(y.sonIvme, 1)} m/sn²"}" +
+            (if (y.eskiMi(System.nanoTime())) " · eski" else "")
     }
 
     /** Tests only. */
@@ -102,6 +133,7 @@ object Teshis {
         disSicaklikHam = null; disSicaklikHamZamani = 0L
         yayinAlicisi = "kayıtlı değil"; yapiskanGeldi = false
         konumIzni = null; gps = "başlamadı"; konumSayisi = 0; hizsizKonumSayisi = 0; sonKonumZamani = 0L
+        konumAraligi.sifirla(); hamHiz = null; hizDogrulugu = null; dogrulukluKonumSayisi = 0
         kapiServisiBagli = false; listeDisiPencere = 0; kapiZamanAsimi = 0
         synchronized(kapiOlaylari) { kapiOlaylari.clear() }
         sonHata = null

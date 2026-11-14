@@ -103,6 +103,7 @@ object KlimaCozucu {
      */
     fun sicaklik(v: Any?): Sicaklik? {
         if (v is String) {
+            if (v.length > METIN_EN_UZUN) return null
             when (v.trim().uppercase(Locale.ROOT)) {
                 "LO", "LOW" -> return Sicaklik.Low
                 "HI", "HIGH" -> return Sicaklik.Hi
@@ -127,7 +128,7 @@ object KlimaCozucu {
         else -> when (sayi(v)) {
             0.0 -> false
             1.0 -> true
-            else -> if (v is String) v.trim().lowercase(Locale.ROOT).toBooleanStrictOrNull() else null
+            else -> if (v is String && v.length <= METIN_EN_UZUN) v.trim().lowercase(Locale.ROOT).toBooleanStrictOrNull() else null
         }
     }
 
@@ -141,16 +142,32 @@ object KlimaCozucu {
     private val DERECE_EKI = Regex("\\s*(\u2103|°\\s*[Cc]?)\\s*$")
 
     /** [sayi] for temperatures: a text value may end in a degree sign ([DERECE_EKI]). */
-    private fun derece(v: Any?): Double? = if (v is String) sayi(v.trim().replace(DERECE_EKI, "")) else sayi(v)
+    private fun derece(v: Any?): Double? =
+        if (v is String) { if (v.length > METIN_EN_UZUN) null else sayi(v.trim().replace(DERECE_EKI, "")) } else sayi(v)
+
+    /** Longer text is not a value of these keys (and is not worth a regex): null. */
+    const val METIN_EN_UZUN = 32
 
     /**
-     * Int, Long, Float, Double or text. Text is parsed with a dot decimal, independent of the Locale
-     * (toDoubleOrNull); a comma is also taken as the decimal mark ("23,0"), as no unit would use it
-     * as a thousands separator for these small numbers.
+     * The only accepted number text: optional sign, digits, optionally a dot or comma and digits
+     * ("23", "-4", "23.0", "23,5"). Rejects what toDouble() would also take: "1e1", "23d", "0x1.8p4",
+     * "NaN", "Infinity", ".5", "5." (0.1.1 review). ASCII digits only: on Android (ICU regex) `\d` also
+     * matches other scripts' digits, which toDoubleOrNull would then misread or reject.
+     */
+    private val SAYI_METNI = Regex("""^[+-]?[0-9]+([.,][0-9]+)?$""")
+
+    /**
+     * Int, Long, Float, Double or text. Text must match [SAYI_METNI] after trimming and is read with a dot
+     * decimal, independent of the Locale; a comma is also taken as the decimal mark ("23,0"), as no unit
+     * would use it as a thousands separator for these small numbers.
      */
     private fun sayi(v: Any?): Double? = when (v) {
         is Number -> v.toDouble().takeIf { !it.isNaN() && !it.isInfinite() }
-        is String -> v.trim().replace(',', '.').toDoubleOrNull()?.takeIf { !it.isNaN() && !it.isInfinite() }
+        is String -> {
+            val m = v.trim()
+            if (v.length > METIN_EN_UZUN || !SAYI_METNI.matches(m)) null
+            else m.replace(',', '.').toDoubleOrNull()?.takeIf { !it.isNaN() && !it.isInfinite() }
+        }
         else -> null
     }
 

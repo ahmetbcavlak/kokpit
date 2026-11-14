@@ -13,6 +13,8 @@ import dev.kokpit.anaekran.Katmanlar
  *
  *  - kur: registers the climate/outside-temperature receiver for the app's life (application context);
  *    asks for the location permission if it was never asked before.
+ *  - every GPS speed also goes into [Hiz.yumusatici] (smoothed speed for the frame loop, see [HizYumusatici]);
+ *    it is reset when GPS stops.
  *  - basla (onResume): starts GPS if permitted. The permission dialog pauses and resumes the Activity,
  *    so a fresh grant is picked up here.
  *  - dur (onPause): stops GPS (the climate receiver stays: values are current when the app returns).
@@ -36,7 +38,11 @@ class VeriBaglayici : Baglayici {
     internal fun hazirla(activity: Activity) {
         val uyg = activity.applicationContext
         klima = KlimaKaynagi(uyg).also { it.basla() }
-        hiz = HizKaynagi(uyg.getSystemService(Context.LOCATION_SERVICE) as? LocationManager, { izinVar(uyg) })
+        hiz = HizKaynagi(
+            uyg.getSystemService(Context.LOCATION_SERVICE) as? LocationManager,
+            { izinVar(uyg) },
+            yumusatici = Hiz.yumusatici,
+        )
         val izin = izinVar(uyg)
         Teshis.konumIzni = izin
         if (izin) return

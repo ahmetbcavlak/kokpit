@@ -34,6 +34,7 @@ class VeriBaglayiciTest {
     fun temizle() {
         AracVerisi.sifirla()
         Teshis.sifirla()
+        Hiz.yumusatici.sifirla()
     }
 
     private fun bosalt() = shadowOf(Looper.getMainLooper()).idle()
@@ -83,7 +84,16 @@ class VeriBaglayiciTest {
         b.basla()
         assertTrue(b.hizKaynagi!!.dinliyorMu)
         assertEquals(1, shadowOf(lm).getLocationRequests(LocationManager.GPS_PROVIDER).size)
+        // Every GPS speed also reaches the shared smoother; stopping GPS resets it.
+        shadowOf(lm).simulateLocation(Location(LocationManager.GPS_PROVIDER).apply {
+            speed = 12.5f
+            elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+        })
+        bosalt()
+        assertEquals(12.5f, Hiz.yumusatici.sonHam!!, 0f)
+        assertEquals(12.5f, Teshis.hamHiz!!, 0f)
         b.dur()
+        assertNull(Hiz.yumusatici.sonHam)
         assertEquals(0, shadowOf(lm).getLocationRequests(LocationManager.GPS_PROVIDER).size)
 
         // Destroyed: receiver gone, broadcasts no longer arrive.

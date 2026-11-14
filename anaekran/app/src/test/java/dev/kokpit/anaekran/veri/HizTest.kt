@@ -30,6 +30,7 @@ class HizTest {
     fun temizle() {
         AracVerisi.sifirla()
         Teshis.sifirla()
+        Hiz.yumusatici.sifirla()
     }
 
     // --- Pure hysteresis (decision 9), samples once a second ---
@@ -94,17 +95,26 @@ class HizTest {
 
     private fun bekle(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
 
-    private fun konum(kmh: Double?, ns: Long = SystemClock.elapsedRealtimeNanos()) = Location(LocationManager.GPS_PROVIDER).apply {
-        latitude = 41.0; longitude = 29.0
-        time = System.currentTimeMillis()
-        elapsedRealtimeNanos = ns
-        if (kmh != null) speed = (kmh / 3.6).toFloat()
-    }
+    private fun konum(kmh: Double?, ns: Long = SystemClock.elapsedRealtimeNanos(), dogruluk: Float? = null) =
+        Location(LocationManager.GPS_PROVIDER).apply {
+            latitude = 41.0; longitude = 29.0
+            time = System.currentTimeMillis()
+            elapsedRealtimeNanos = ns
+            if (kmh != null) speed = (kmh / 3.6).toFloat()
+            if (dogruluk != null) speedAccuracyMetersPerSecond = dogruluk
+        }
 
-    private fun kaynak(): HizKaynagi {
+    private fun kaynak(y: HizYumusatici? = null): HizKaynagi {
         shadowOf(uyg).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         shadowOf(lm).setProviderEnabled(LocationManager.GPS_PROVIDER, true)
-        return HizKaynagi(lm, { VeriBaglayici.izinVar(uyg) }).also { it.basla() }
+        // Frame clock = Robolectric's elapsed clock, so tests can check the smoother's sample times.
+        return HizKaynagi(lm, { VeriBaglayici.izinVar(uyg) }, yumusatici = y, kareNs = { SystemClock.elapsedRealtimeNanos() })
+            .also { it.basla() }
+    }
+
+    private fun fix(l: Location) {
+        shadowOf(lm).simulateLocation(l)
+        shadowOf(Looper.getMainLooper()).idle()
     }
 
     /** One fix per second, like the real 1 s request. */
@@ -190,5 +200,149 @@ class HizTest {
         val y = HizKaynagi(null, { true })
         y.basla()
         assertFalse(y.dinliyorMu)
+    }
+
+    // --- 0.2: request, raw stream, smoother feed, measured intervals ---
+
+    @Test
+    fun konumIstegi_minTime0_minDistance0_gpsSaglayicisi() {
+        kaynak()
+        val istekler = shadowOf(lm).getLegacyLocationRequests(LocationManager.GPS_PROVIDER)
+        assertEquals(1, istekler.size)
+        assertEquals(0L, istekler[0].intervalMillis)
+        assertEquals(0f, istekler[0].minUpdateDistanceMeters, 0f)
+        assertEquals(0, shadowOf(lm).getLegacyLocationRequests(LocationManager.NETWORK_PROVIDER).size)
+    }
+
+    @Test
+    fun hamHizYumusaticiyaVeTeshise_ayniHizDinleyiciyiUyandirmaz() {
+        val y = HizYumusatici()
+        val h = kaynak(y)
+        var uyanma = 0
+        val d = AracDinleyici { uyanma++ }
+        AracVerisi.dinle(d)
+        try {
+            bekle(1000)
+            val t1 = SystemClock.elapsedRealtimeNanos()
+            fix(konum(7.4))
+            assertEquals(7.0, AracVerisi.durum.hiz!!, 0.0) // rounded as in 0.1 (5–10 km/h: no state change)
+            assertEquals((7.4 / 3.6).toFloat(), Teshis.hamHiz!!, 1e-5f) // not rounded, m/s
+            assertEquals((7.4 / 3.6).toFloat(), y.sonHam!!, 1e-5f)
+            assertEquals(y.sonHam!!.toDouble(), y.hedef(t1), 1e-6) // arrival time on the frame clock
+            assertEquals(1, uyanma)
+
+            // Same rounded speed again, 10 fixes a second for 3 s: no listener wakes (0.1 rule kept).
+            repeat(30) { bekle(100); fix(konum(7.2)) }
+            assertEquals(1, uyanma)
+            assertEquals((7.2 / 3.6).toFloat(), y.sonHam!!, 1e-5f)
+            assertEquals(31, Teshis.konumSayisi)
+
+            // 5 s quiet: the rounded speed goes (0.1), the smoother keeps its value and is stale.
+            bekle(6000)
+            assertNull(AracVerisi.durum.hiz)
+            assertEquals(2, uyanma)
+            assertTrue(y.eskiMi(SystemClock.elapsedRealtimeNanos()))
+            assertFalse(y.bilinmiyor)
+            // 60 s quiet (same moment as the parked/driving state): the smoother forgets, "—".
+            bekle(55_000)
+            assertTrue(y.bilinmiyor)
+        } finally {
+            AracVerisi.birak(d)
+            h.dur()
+        }
+        assertNull(y.sonHam)
+    }
+
+    @Test
+    fun durSonrasiGelenKonumYokSayilir() {
+        val y = HizYumusatici()
+        val h = kaynak(y)
+        bekle(1000); fix(konum(20.0))
+        // Posted from another thread, but GPS stops before the main thread runs it.
+        val t = Thread { h.onLocationChanged(konum(80.0)) }
+        t.start(); t.join()
+        h.dur()
+        shadowOf(Looper.getMainLooper()).idle()
+        // Delivered directly after dur() as well.
+        h.onLocationChanged(konum(90.0))
+        assertNull(AracVerisi.durum.hiz)
+        assertNull(y.sonHam)
+        assertEquals(1, Teshis.konumSayisi)
+    }
+
+    @Test
+    fun hizYalnizGetSpeedden_hasSpeedYoksaHicbirSeyGuncellenmez() {
+        val y = HizYumusatici()
+        val h = kaynak(y)
+        bekle(1000)
+        fix(konum(20.0))
+        val once = AracVerisi.durum
+        // A fix without speed, far away from the last one: no speed is derived from positions.
+        bekle(1000)
+        fix(konum(null).apply { latitude = 41.01; longitude = 29.01 })
+        assertEquals(once, AracVerisi.durum)
+        assertEquals((20.0 / 3.6).toFloat(), y.sonHam!!, 1e-5f)
+        assertEquals(1, Teshis.hizsizKonumSayisi)
+        // … but it still counts as a fix for the interval measurement.
+        assertEquals(1, Teshis.konumAraligi.sayi)
+        h.dur()
+    }
+
+    @Test
+    fun anaIsParcacigiDisindanGelenKonum_anaya_gonderilir() {
+        val y = HizYumusatici()
+        val h = kaynak(y)
+        bekle(1000)
+        val t = Thread { h.onLocationChanged(konum(54.0)) }
+        t.start(); t.join()
+        assertNull(y.sonHam) // not touched off the main thread
+        assertNull(AracVerisi.durum.hiz)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(15f, y.sonHam!!, 1e-5f)
+        assertEquals(54.0, AracVerisi.durum.hiz!!, 0.0)
+        h.dur()
+    }
+
+    @Test
+    fun hizDogrulugu_teshiseVeSifirEsigine() {
+        val y = Hiz.yumusatici // the diagnostics line reads the shared one
+        val h = kaynak(y)
+        bekle(1000); fix(konum(18.0))
+        assertNull(Teshis.hizDogrulugu)
+        // 0.9 m/s would not be zero mode with the 0.5 threshold; with accuracy 1.2 the threshold is 1.2.
+        bekle(1000); fix(konum(0.9 * 3.6, dogruluk = 1.2f))
+        bekle(1000); fix(konum(0.9 * 3.6, dogruluk = 1.2f))
+        assertEquals(1.2f, Teshis.hizDogrulugu!!, 1e-6f)
+        assertEquals(2, Teshis.dogrulukluKonumSayisi)
+        assertTrue(y.sifirda)
+        assertTrue(Teshis.satirlar().any { it.startsWith("GPS hız:") && it.contains("doğruluk 1,20 m/sn") && it.contains("sıfır kipi") })
+        h.dur()
+    }
+
+    @Test
+    fun ornekAraligiOlculur_teshiseYazilir() {
+        val h = kaynak()
+        for (i in 0..4) { bekle(500); fix(konum(30.0)) } // 2 Hz
+        for (ms in longArrayOf(1000, 1000, 1000)) { bekle(ms); fix(konum(30.0)) } // 1 Hz
+        for (ms in longArrayOf(300, 1700, 900)) { bekle(ms); fix(konum(30.0)) } // irregular
+        val a = Teshis.konumAraligi
+        assertEquals(10, a.sayi)
+        assertEquals(300_000_000L, a.enKisaNs)
+        assertEquals(1_700_000_000L, a.enUzunNs)
+        assertEquals(790_000_000L, a.ortalamaNs()) // (4·0.5 + 3·1 + 0.3 + 1.7 + 0.9) / 10
+        assertEquals(listOf(500L, 500, 500, 1000, 1000, 1000, 300, 1700, 900).map { it * 1_000_000 }, a.son().takeLast(9))
+        assertTrue(Teshis.satirlar().contains(
+            "GPS aralığı: ort 0,79 sn · en kısa 0,30 · en uzun 1,70 · 10 aralık · son: 0,50 0,50 0,50 0,50 1,00 1,00 1,00 0,30 1,70 0,90",
+        ))
+        // A pause (GPS stopped and started again) is not an interval.
+        h.dur()
+        bekle(30_000)
+        h.basla()
+        bekle(1000); fix(konum(30.0))
+        assertEquals(10, a.sayi)
+        bekle(1000); fix(konum(30.0))
+        assertEquals(11, a.sayi)
+        assertEquals(1_700_000_000L, a.enUzunNs)
+        h.dur()
     }
 }

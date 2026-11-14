@@ -22,6 +22,9 @@ fun interface AracDinleyici {
  *
  * Listeners hear only a change of a VALUE. A write that repeats the same values updates the
  * per-field times silently (AC8227L: no screen work for a speed that did not change).
+ *
+ * The smoothed speed for animation is not here: it lives in [Hiz.yumusatici] (frame loop, m/s), which
+ * wakes a stopped frame loop through its own callback ([HizYumusatici.uyandir]).
  */
 object AracVerisi {
 

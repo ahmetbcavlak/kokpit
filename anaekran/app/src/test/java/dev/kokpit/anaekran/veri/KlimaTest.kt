@@ -121,6 +121,39 @@ class KlimaTest {
     }
 
     @Test
+    fun metinSayiSikiBicim_uzunMetinNull() {
+        // What Kotlin's toDouble() would also accept is not a number here (0.1.1 review).
+        for (m in listOf("1e1", "2.3e1℃", "23d", "23f", "23D", "0x1.8p4", "0x17", "NaN", "Infinity", "-Infinity",
+            ".5", "23.", "2 3", "23.0.0", "+-23", "٢٣", "23,5,1", "--3")) {
+            assertNull("sicaklik($m)", KlimaCozucu.sicaklik(m))
+            assertNull("disSicaklik($m)", KlimaCozucu.disSicaklik(m))
+        }
+        assertNull(KlimaCozucu.fan("3e0"))
+        assertNull(KlimaCozucu.fan("0x3"))
+        assertNull(KlimaCozucu.bayrak("1e0"))
+        assertNull(KlimaCozucu.bayrak("NaN"))
+        // The strict form still takes signs, dot and comma decimals.
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik("+23"))
+        assertEquals(Sicaklik.Derece(23.5), KlimaCozucu.sicaklik("23,5℃"))
+        assertEquals(-4.0, KlimaCozucu.disSicaklik("-4")!!, 0.0)
+        assertEquals(1, KlimaCozucu.fan("1"))
+        assertEquals(true, KlimaCozucu.bayrak("1"))
+        assertEquals(false, KlimaCozucu.bayrak("false"))
+
+        // Longer than 32 characters: null, even if a number is in there.
+        val uzun = "23.0" + " ".repeat(29) + "℃" // 34 characters
+        assertTrue(uzun.length > KlimaCozucu.METIN_EN_UZUN)
+        assertNull(KlimaCozucu.sicaklik(uzun))
+        assertNull(KlimaCozucu.disSicaklik(uzun))
+        assertNull(KlimaCozucu.fan("0".repeat(33) + "3"))
+        assertNull(KlimaCozucu.sicaklik("LOW" + " ".repeat(30)))
+        assertNull(KlimaCozucu.bayrak("true" + " ".repeat(30)))
+        val sinirda = "23.0" + " ".repeat(27) + "℃" // exactly 32: still read
+        assertEquals(32, sinirda.length)
+        assertEquals(Sicaklik.Derece(23.0), KlimaCozucu.sicaklik(sinirda))
+    }
+
+    @Test
     fun disSicaklikMetin() {
         assertEquals(14.0, KlimaCozucu.disSicaklik("14.0℃")!!, 0.0)
         // 0 is a real outside temperature (unlike the set temperature).
