@@ -96,9 +96,10 @@ class SurusEkrani(context: Context, private val konumIzni: () -> Boolean) : Ekra
         // No speed lines here: the drive scene draws them (opacity by speed), by day too since
         // 0.2.1 — drawing them here as well would double them (HareketBaglayici step 12).
         Cizgiler.hizYayiTaban(c, p)
-        // Night ruler under the car, between it and the near lane line (0.2 demo Y-3h, y 646.8);
-        // by day 0.1's Y-11 place (602).
-        Cizgiler.cetvel(c, p, if (p.gunduz) 602f else 646.8f)
+        // Ruler under the car, between it and the near lane line (0.2 demo Y-3h, y 646.8). By day
+        // too since 0.2.1: the day scene has the night layout (K-108), and 0.1's Y-11 place (602)
+        // would cross the tyres and the shadow.
+        Cizgiler.cetvel(c, p, CETVEL_Y)
         Cizgiler.arti(c, p, 721f, 396f)
     }
 
@@ -207,6 +208,9 @@ class SurusEkrani(context: Context, private val konumIzni: () -> Boolean) : Ekra
         private const val BOS = Int.MIN_VALUE
         private const val RAKAM_SAYISI = 300
         private const val GPS = "gps"
+
+        /** Ruler line y, design px, night and day (0.2 Y-3h; day since 0.2.1). */
+        const val CETVEL_Y = 646.8f
 
         /** Design pack 0.2 §3: "gps" label soluk = 40 %. */
         const val ESKI_OPAKLIK = 0.4f

@@ -346,6 +346,25 @@ class SurusBaglamaTest {
         assertFalse("sahne_karsilama hiç çözülmemeli", Gorseller.hazirMi(R.drawable.sahne_karsilama))
     }
 
+    @Test
+    fun gunduzCetveliAracinAltinda() { // 0.2.1: day ruler at the night place (646.8), not 0.1's 602
+        assertEquals(646.8f, SurusEkrani.CETVEL_Y, 0f)
+        for (p in listOf(Palet.GUNDUZ, Palet.GECE)) {
+            Tema.zorla(p)
+            val ekran = SurusEkrani(RuntimeEnvironment.getApplication()) { true }
+            ekran.temaDegisti(p)
+            val v = ekran.gorunum
+            v.measure(View.MeasureSpec.makeMeasureSpec(768, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(1024, View.MeasureSpec.EXACTLY))
+            v.layout(0, 0, 768, 1024)
+            val b = android.graphics.Bitmap.createBitmap(768, 1024, android.graphics.Bitmap.Config.ARGB_8888)
+            v.draw(android.graphics.Canvas(b))
+            // A tick at x 40 spans y ± 3 around the ruler line.
+            fun alfa(x: Int, y: Int) = android.graphics.Color.alpha(b.getPixel(x, y))
+            assertTrue("${p.ad}: cetvel 646,8'de yok", (644..649).any { alfa(40, it) > 0 })
+            assertTrue("${p.ad}: 602'de cetvel kalmış", (598..606).all { alfa(40, it) == 0 })
+        }
+    }
+
     // --- İ-F2 ---
 
     private val R_ARAC = setOf(
