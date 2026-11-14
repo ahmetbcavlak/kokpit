@@ -97,7 +97,7 @@ class HareketBaglayiciTest {
         var hiz = 0f
         h.surusHizi({ hiz }, { hiz == 0f })
         var hudHizi = -1f
-        h.surusKaresi { _, v -> hudHizi = v }
+        h.surusKaresi(dev.kokpit.anaekran.hareket.surus.KareDinleyici { _, v -> hudHizi = v })
         val s = h.surusSahnesi(a)
         assertSame(s, h.surusSahnesi(a))
         TestYardim.bosalt() // bitmaps decoded (worker inline) and handed over

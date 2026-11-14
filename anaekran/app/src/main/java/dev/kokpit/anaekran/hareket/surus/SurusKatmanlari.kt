@@ -111,16 +111,20 @@ internal class SeritCizgisi(olcek: Float, opaklik: Float) {
 
 /**
  * Behind the car, bottom to top (demo z-index 1, DOM order): distant city lights, far lane
- * line. Bounds: y 447 (lights) … 587 (far line), full width. The lights tile is drawn at a
- * fractional x with bitmap filtering (smooth sub-pixel motion). Deviation from the demo: no
- * 15 % edge fade on the lights (research §1: the dots simply leave the screen; a fade would need
- * a per-frame shader matrix).
+ * line. Bounds: y 447 (lights) … 587 (far line), full width.
+ * Lights: each dot of the 600 px tile is drawn on its own (a small source rectangle of the tile,
+ * at a fractional x with bitmap filtering: smooth sub-pixel motion), its alpha × the demo's
+ * edge mask (`linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent)`) taken at
+ * the dot's centre. Per dot instead of per pixel (a dot is ~16 px wide): no shader matrix per
+ * frame, no layer — ≤ 8 small bitmap draws.
  */
 @SuppressLint("ViewConstructor")
 class ArkaKatman(context: Context) : SurusKatmani(context) {
     private val ust = SurusYerlesim.ISIK_Y.toFloat()
     private val uzak = SeritCizgisi(SurusFormul.UZAK_OLCEK, SurusFormul.UZAK_OPAKLIK)
     private val isikBoya = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val kaynak = android.graphics.Rect()
+    private val hedef = android.graphics.RectF()
 
     var isik: Bitmap? = null
     var isikOfset = 0f
@@ -130,12 +134,23 @@ class ArkaKatman(context: Context) : SurusKatmani(context) {
     override fun onDraw(c: Canvas) {
         val b = isik
         if (b != null && isikOpakligi > 0f) {
-            isikBoya.alpha = Math.round(255 * isikOpakligi.coerceIn(0f, 1f))
             val d = SurusYerlesim.ISIK_DESEN.toFloat()
-            var x = isikOfset - d
-            while (x < SurusYerlesim.TASARIM_W) {
-                c.drawBitmap(b, x, 0f, isikBoya)
-                x += d
+            val w = SurusYerlesim.TASARIM_W.toFloat()
+            var x0 = isikOfset - d
+            while (x0 < w) {
+                for (i in 0 until SurusVarliklari.ISIK_SAYISI) {
+                    val cx = x0 + SurusVarliklari.isikX(i)
+                    val yari = SurusVarliklari.isikYaricap(i)
+                    if (cx + yari <= 0f || cx - yari >= w) continue
+                    val maske = kenarMaskesi(cx / w)
+                    if (maske <= 0f) continue
+                    val sx = SurusVarliklari.isikX(i)
+                    kaynak.set((sx - yari).toInt(), 0, (sx + yari).toInt(), SurusYerlesim.ISIK_H)
+                    hedef.set(x0 + kaynak.left, 0f, x0 + kaynak.right, SurusYerlesim.ISIK_H.toFloat())
+                    isikBoya.alpha = Math.round(255 * (isikOpakligi * maske).coerceIn(0f, 1f))
+                    c.drawBitmap(b, kaynak, hedef, isikBoya)
+                }
+                x0 += d
             }
         }
         uzak.ciz(c, uzakOfset, SurusYerlesim.UZAK_Y - ust, SurusYerlesim.UZAK_H)
@@ -144,6 +159,14 @@ class ArkaKatman(context: Context) : SurusKatmani(context) {
     companion object {
         const val Y = SurusYerlesim.ISIK_Y
         val H = Math.round(SurusYerlesim.UZAK_Y + SurusYerlesim.UZAK_H) - SurusYerlesim.ISIK_Y
+
+        /** Demo mask: 0 at the edges, 1 from 15 % to 85 % of the width. */
+        fun kenarMaskesi(x: Float): Float = when {
+            x <= 0f || x >= 1f -> 0f
+            x < 0.15f -> x / 0.15f
+            x > 0.85f -> (1f - x) / 0.15f
+            else -> 1f
+        }
     }
 }
 
@@ -213,8 +236,8 @@ class YansimaKatmani(context: Context) : SurusKatmani(context) {
     }
     private var govde: Bitmap? = null
 
-    /** Band left edge as a share of the body box width; null = no band. */
-    var konum: Float? = null
+    /** Band left edge as a share of the body box width; NaN = no band. */
+    var konum: Float = Float.NaN
 
     /** 0…1, multiplies the band (0 at a standstill). */
     var gorunurluk = 0f
@@ -229,13 +252,19 @@ class YansimaKatmani(context: Context) : SurusKatmani(context) {
         boya.shader = ComposeShader(BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP), bant, PorterDuff.Mode.SRC_IN)
     }
 
+    /** Drops the body bitmap (birak): no shader keeps it alive. */
+    fun govdeBirak() {
+        govde = null
+        boya.shader = null
+    }
+
     /** True when [konum] and [gorunurluk] give something to draw. */
-    val ciziyor: Boolean get() = govde != null && konum != null && gorunurluk > 0f
+    val ciziyor: Boolean get() = govde != null && !konum.isNaN() && gorunurluk > 0f
 
     override fun onDraw(c: Canvas) {
         sonDikdortgen.setEmpty()
-        val k = konum ?: return
-        if (govde == null || gorunurluk <= 0f) return
+        val k = konum
+        if (k.isNaN() || govde == null || gorunurluk <= 0f) return
         val sol = SurusYerlesim.KUTU_X + k * SurusYerlesim.KUTU_W - SurusYerlesim.GOVDE_X
         // gradient space x 0…bantW → local x = sol + x + egim·(y − merkezY)
         matris.setTranslate(sol, 0f)

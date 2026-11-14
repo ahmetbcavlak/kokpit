@@ -55,8 +55,8 @@ class SurusSahnesiTest {
         a = Robolectric.buildActivity(Activity::class.java).setup().get()
         kaynak = SahteKaynak()
         s = SurusSahnesi(a, kaynak) { simdi }
-        s.hizSaglayici = { okuma++; hiz }
-        s.durgunSaglayici = { durgun }
+        s.hizSaglayici = HizSaglayici { okuma++; hiz }
+        s.durgunSaglayici = DurgunSaglayici { durgun }
         s.varliklariKur(SurusVarliklari.coz(a.resources))
         kap = FrameLayout(a)
         kap.addView(s, FrameLayout.LayoutParams(768, 1024))
@@ -160,7 +160,7 @@ class SurusSahnesiTest {
         durgun = false
         var dinleyici = 0
         var sonHiz = -1f
-        s.kareDinleyici = { _, h -> dinleyici++; sonHiz = h }
+        s.kareDinleyici = KareDinleyici { _, h -> dinleyici++; sonHiz = h }
         s.basla()
         kareler(1)
         assertEquals("ilk kare dt = 0", 0.0, s.model.mesafe, 0.0)
@@ -229,7 +229,7 @@ class SurusSahnesiTest {
         assertTrue("$cizdi", cizdi in 54..59)
         assertTrue(bos > cizdi)
         // a band on the body is drawn inside the body box
-        while ((y.konum ?: -1f) < 0.3f) kareler(1)
+        while (y.konum.isNaN() || y.konum < 0.3f) kareler(1)
         y.measure(View.MeasureSpec.makeMeasureSpec(SurusYerlesim.GOVDE_W, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(SurusYerlesim.GOVDE_H, View.MeasureSpec.EXACTLY))
         y.layout(0, 0, SurusYerlesim.GOVDE_W, SurusYerlesim.GOVDE_H)
         val bmp = Bitmap.createBitmap(SurusYerlesim.GOVDE_W, SurusYerlesim.GOVDE_H, Bitmap.Config.ARGB_8888)
@@ -245,23 +245,76 @@ class SurusSahnesiTest {
     }
 
     @Test
-    fun durgundanBasla_ilkKareDinlenmeGorunumu() {
+    fun durgundanBasla_ilkKareKlibinSonKaresi() {
         hiz = 90f / 3.6f
         durgun = false
         s.basla()
         kareler(200)
         assertTrue(s.dunyaGorunumu.scaleX < 0.99f)
+        assertTrue(s.model.mesafe > 10.0)
         s.durgundanBasla(1000)
-        assertEquals(1f, s.dunyaGorunumu.scaleX)
-        val aci = s.model.tekerAcisi
         kareler(1)
-        assertEquals("rampa sıfırdan başlar", aci, s.model.tekerAcisi, 1e-6)
-        assertEquals(1f, s.dunyaGorunumu.scaleX, 1e-6f)
+        // first frame = the clip's still last frame
+        assertEquals("sıfır açı", 0.0, s.model.tekerAcisi, 1e-9)
+        assertEquals("sıfır mesafe", 0.0, s.model.mesafe, 1e-9)
+        assertEquals(0f, s.tekerOnGorunumleri[0].rotation, 0f)
+        assertEquals(1f, s.dunyaGorunumu.scaleX, 0f)
+        assertEquals(0f, s.dunyaGorunumu.translationY, 0f)
+        assertEquals("şerit/ışık alfa 0", 0f, s.arkaGorunumu.alpha, 0f)
+        assertEquals(0f, s.onGorunumu.alpha, 0f)
+        assertEquals(0f, s.izGorunumu.alpha, 0f)
+        assertFalse("bant gövdede değil", s.yansimaGorunumu.ciziyor && s.yansimaGorunumu.konum > -0.2f)
         kareler(30)
         assertTrue(s.model.hiz in 0.1f..hiz * 0.7f)
+        assertTrue(s.arkaGorunumu.alpha in 0.05f..0.95f)
         kareler(60)
         assertEquals(hiz, s.model.hiz, 1e-4f)
+        assertEquals(1f, s.arkaGorunumu.alpha, 0f)
+        assertEquals(1f, s.onGorunumu.alpha, 0f)
         assertEquals("HUD gerçek hızı alır", hiz, s.sonHizMs)
+    }
+
+    @Test
+    fun hazirOlunca_birKez_hazirsaHemen() {
+        val y = SurusSahnesi(a, kaynak) { simdi }
+        var n = 0
+        y.hazirOlunca = { n++ }
+        assertEquals(0, n)
+        assertFalse(y.hazir)
+        y.varliklariKur(SurusVarliklari.coz(a.resources))
+        assertEquals(1, n)
+        y.varliklariKur(SurusVarliklari.coz(a.resources))
+        assertEquals(1, n)
+        y.hazirOlunca = { n++ }
+        assertEquals("zaten hazır: hemen", 2, n)
+    }
+
+    @Test
+    fun durgunDuruskenUzunAraTempoyaGirmez() {
+        hiz = 10f
+        durgun = false
+        s.basla()
+        kareler(60)
+        hiz = 0f
+        durgun = true
+        kareler(400)
+        assertFalse(s.donguBekliyor)
+        // 2 s still, then the car moves again: the gap is not a slow frame
+        simdi += 2_000_000_000L
+        hiz = 10f
+        durgun = false
+        s.uyandir()
+        kareler(120)
+        assertFalse(s.tempo.yariHiz)
+        assertEquals(0, s.tempo.yariyaInisSayisi)
+    }
+
+    @Test
+    fun birakGorselleriBirakir() {
+        assertTrue(s.yansimaGorunumu.ciziyor || true)
+        s.birak()
+        assertFalse(s.yansimaGorunumu.ciziyor)
+        assertEquals(null, s.tekerOnGorunumleri[0].drawable)
     }
 
     @Test

@@ -163,5 +163,14 @@ class SurusVarliklari(
         )
 
         private const val BULANIKLIK_SIGMA = 1.5f
+
+        /** Number of light dots in the tile. */
+        val ISIK_SAYISI: Int get() = ISIKLAR.size
+
+        /** Centre x of dot [i] in the tile, px. */
+        fun isikX(i: Int): Float = ISIKLAR[i].x
+
+        /** Half width of dot [i]'s source rectangle: its fade radius + the blur (3σ) + 1 px. */
+        fun isikYaricap(i: Int): Float = ISIKLAR[i].r1 + BULANIKLIK_SIGMA * 3f + 1f
     }
 }

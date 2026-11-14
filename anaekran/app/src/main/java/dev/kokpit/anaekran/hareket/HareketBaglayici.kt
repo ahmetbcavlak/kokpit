@@ -6,6 +6,9 @@ import android.widget.FrameLayout
 import dev.kokpit.anaekran.Baglayici
 import dev.kokpit.anaekran.Katmanlar
 import dev.kokpit.anaekran.ekran.Gecis
+import dev.kokpit.anaekran.hareket.surus.DurgunSaglayici
+import dev.kokpit.anaekran.hareket.surus.HizSaglayici
+import dev.kokpit.anaekran.hareket.surus.KareDinleyici
 import dev.kokpit.anaekran.hareket.surus.SurusSahnesi
 import dev.kokpit.anaekran.tema.Palet
 import dev.kokpit.anaekran.tema.Tema
@@ -51,19 +54,25 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  *  7. Create it once, after [kur]: `val sahne = hareket.surusSahnesi(activity)`. It is a
  *     full-screen, transparent view that takes no touches; the SURUS screen puts it as its
  *     BOTTOM child, under every HUD view (MATCH_PARENT). The bitmaps are decoded on the worker
- *     thread right away (≈ 1.25 MB). The frame-rate counter hears its motion by itself.
- *  8. Speed: `hareket.surusHizi(Hiz.yumusatici::deger, Hiz.yumusatici::durgun)` (veri/HizYumusatici,
- *     m/s, System.nanoTime timebase). Call [surusUyandir] from `durumDegisti` (every data update) so
- *     a stopped scene restarts at once; without it the scene still restarts within 250 ms (it polls
- *     `durgun` while stopped).
+ *     thread right away (≈ 1.25 MB); keep the scene INVISIBLE until `sahne.hazirOlunca { … }`
+ *     fires (before that it has no car). The frame-rate counter hears its motion by itself.
+ *  8. Speed (veri/HizYumusatici, m/s, System.nanoTime timebase):
+ *     `hareket.surusHizi(HizSaglayici(Hiz.yumusatici::deger), DurgunSaglayici(Hiz.yumusatici::durgun))`
+ *     (primitive fun interfaces: no boxing per frame). `bilinmiyor` needs nothing here: `deger`
+ *     is 0 then and the scene stands still (the HUD shows "—").
+ *     Waking: in onResume `Hiz.yumusatici.uyandir = { hareket.surusUyandir() }` (the smoother
+ *     calls it when it leaves rest, becomes known or fresh, and in `unut`), in onPause
+ *     `Hiz.yumusatici.uyandir = null`. If the screen's own loop also owns `uyandir` (when the
+ *     scene is hidden, see below), let one lambda call both. Without any waking the scene still
+ *     restarts within 250 ms (it polls `durgun` while stopped).
  *     ONE reader per frame: `deger` advances the smoother on every call, so the SURUS screen must
- *     not call it as well. It takes the scene's value instead:
- *     `hareket.surusKaresi { zamanNs, hizMs -> surusEkrani.hizGoster(hizMs * 3.6) }` (called after
- *     every drawn frame; while the scene is still the last value holds; `Hiz.yumusatici.eskiMi(zamanNs)`
- *     for the dim "gps" label may be read in the same callback, it does not move the spring).
- *     The callback comes only while the scene runs. When it does not (day: scene INVISIBLE; while
- *     `Klip.SURUS` plays; at a standstill the last value holds and is right), the screen reads
- *     `deger` on its own frame loop instead — check `hareket.surus?.calisiyor`; never both.
+ *     not call it as well while the scene runs. It takes the scene's value instead:
+ *     `hareket.surusKaresi(KareDinleyici { zamanNs, hizMs -> surusEkrani.hizGoster(hizMs * 3.6) })`
+ *     (after every drawn frame; while the scene is still the last value holds and is right;
+ *     `Hiz.yumusatici.eskiMi(zamanNs)` / `bilinmiyor` may be read in the same callback, they do not
+ *     move the spring). The callback comes only while the scene runs. When it does not (day: scene
+ *     INVISIBLE; while `Klip.SURUS` plays; before `hazirOlunca`), the screen reads `deger` on its
+ *     own frame loop instead — the test is `hareket.surus?.calisiyor`; never both.
  *  9. Running: [basla]/[dur] (onResume/onPause, already wired as a Baglayici) start and stop it;
  *     on top of that it runs only while it is visible (a GONE/INVISIBLE SURUS screen stops it).
  *     Nothing else to call per frame.
@@ -72,8 +81,9 @@ import dev.kokpit.anaekran.tema.TemaDinleyici
  * 11. Scene layer under it at night: `boya_gece` (no car — the scene draws the car). Park → drive
  *     at night: keep the drive scene INVISIBLE while `Klip.SURUS` plays (the clip has its own
  *     car), and in the clip's `bitti` switch the scene layer to `boya_gece`, make the drive
- *     scene VISIBLE and call `sahne.durgundanBasla()`: at rest the scene equals the clip's last
- *     frame (PSNR 36.5 dB against sahne_surus), then it picks up the real speed over 1 s.
+ *     scene VISIBLE and call `sahne.durgundanBasla()`: its first frame equals the clip's last
+ *     one (wheel angle 0, camera 1, lines/lights at alpha 0; PSNR 36.5 dB against sahne_surus),
+ *     then over 1 s the speed and the lines/lights come in.
  *     Drive → park: hide the scene when `Klip.SURUS_GERI` starts (its poster is sahne_surus, the
  *     same still car; at the switch the car is below 5 km/h, so nearly at rest).
  * 12. Remove `Cizgiler.hizCizgileri` from SurusEkrani's drawing: the scene draws the speed lines
@@ -109,9 +119,9 @@ class HareketBaglayici(
     var surus: SurusSahnesi? = null
         private set
 
-    private var surusHizi: ((Long) -> Float)? = null
-    private var surusDurgun: ((Long) -> Boolean)? = null
-    private var surusKaresi: ((Long, Float) -> Unit)? = null
+    private var surusHizi: HizSaglayici? = null
+    private var surusDurgun: DurgunSaglayici? = null
+    private var surusKaresi: KareDinleyici? = null
     private var calisiyor = false
 
     override fun kur(activity: Activity, katmanlar: Katmanlar) {
@@ -222,7 +232,7 @@ class HareketBaglayici(
      * smoother is at rest (normally `Hiz.yumusatici::deger` / `::durgun`). May be set before or
      * after [surusSahnesi].
      */
-    fun surusHizi(hiz: (Long) -> Float, durgun: (Long) -> Boolean) {
+    fun surusHizi(hiz: HizSaglayici, durgun: DurgunSaglayici) {
         surusHizi = hiz
         surusDurgun = durgun
         surus?.let {
@@ -236,7 +246,7 @@ class HareketBaglayici(
      * Per-frame speed for the HUD, the same value the scene used ([SurusSahnesi.kareDinleyici]).
      * May be set before or after [surusSahnesi].
      */
-    fun surusKaresi(dinleyici: ((zamanNs: Long, hizMs: Float) -> Unit)?) {
+    fun surusKaresi(dinleyici: KareDinleyici?) {
         surusKaresi = dinleyici
         surus?.kareDinleyici = dinleyici
     }

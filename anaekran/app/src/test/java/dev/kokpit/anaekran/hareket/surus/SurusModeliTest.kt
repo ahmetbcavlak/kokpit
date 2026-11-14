@@ -118,7 +118,7 @@ class SurusModeliTest {
         var oncekiVar = false
         repeat(60 * 34) { // 34 s at 10 m/s = 340 m: sweeps start at 0, 35 … 315 m
             m.ilerle(1f / 60f, 10f)
-            val var_ = m.lambaKonumu != null
+            val var_ = !m.lambaKonumu.isNaN()
             if (var_ && !oncekiVar) supurme++
             oncekiVar = var_
         }
@@ -138,19 +138,57 @@ class SurusModeliTest {
     }
 
     @Test
-    fun dinlenmeyeAl_konumlarKalir() {
+    fun dinlenmeyeAl_klibinSonKaresi() {
         val m = SurusModeli()
         m.ilerle(0f, 20f)
         repeat(120) { m.ilerle(1f / 60f, 20f) }
-        val aci = m.tekerAcisi
-        val mesafe = m.mesafe
+        assertTrue(m.tekerAcisi != 0.0 && m.mesafe > 0.0 && m.kamera < 1f)
         m.dinlenmeyeAl()
         assertEquals(1f, m.kamera)
         assertEquals(0f, m.suspansiyon)
-        assertEquals(aci, m.tekerAcisi, 0.0)
-        assertEquals(mesafe, m.mesafe, 0.0)
+        assertEquals("sprite'ın kendi duruşu", 0.0, m.tekerAcisi, 0.0)
+        assertEquals(0.0, m.mesafe, 0.0)
+        assertEquals(0f, m.yakinOfset)
+        assertEquals(-0.40f, m.lambaKonumu, 1e-6f) // band outside the body
+        assertFalse(m.tavanda)
         // next frame continues from 0 (trapezoid), no jump
         m.ilerle(1f / 60f, 20f)
-        assertEquals(mesafe + 10.0 / 60.0, m.mesafe, 1e-6)
+        assertEquals(10.0 / 60.0, m.mesafe, 1e-6)
+    }
+
+    @Test
+    fun tavan_30da_hemen_yumusakca_30fpsKaredeAzOtuzAltiDerece() {
+        for (k in listOf(30f, 38f, 45f)) {
+            val m = SurusModeli()
+            m.ilerle(0f, ms(k))
+            assertTrue("$k: tavan açık", m.tavanda)
+            var onceki = m.tekerAcisi
+            repeat(90) {
+                m.ilerle(1f / 30f, ms(k))
+                val adim = aciFarki(m.tekerAcisi, onceki)
+                assertTrue("$k km/sa: 30 fps karede ${adim}°", adim < 36.0)
+                onceki = m.tekerAcisi
+            }
+        }
+    }
+
+    @Test
+    fun tavanGecisi_sicramaYok_histerezis() {
+        val m = SurusModeli()
+        m.ilerle(0f, ms(25f))
+        var w = m.gosterilenAcisalHiz
+        // 25 → 35 km/h in 2 s at 60 fps: the shown speed eases (no step per frame > ~1.4 rad/s)
+        for (i in 1..120) {
+            m.ilerle(1f / 60f, ms(25f + 10f * i / 120f))
+            val y = m.gosterilenAcisalHiz
+            assertTrue("kare $i: ${w} → ${y}", abs(y - w) < 2f)
+            w = y
+        }
+        assertTrue(m.tavanda)
+        // noise around 29 km/h does not switch back (exit below 28)
+        repeat(60) { m.ilerle(1f / 60f, ms(if (it % 2 == 0) 29f else 30.5f)) }
+        assertTrue(m.tavanda)
+        repeat(60) { m.ilerle(1f / 60f, ms(27f)) }
+        assertFalse(m.tavanda)
     }
 }

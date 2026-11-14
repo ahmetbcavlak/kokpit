@@ -1,12 +1,10 @@
 package dev.kokpit.anaekran.hareket.surus
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
-import kotlin.math.abs
 
 /** Design pack 0.2 §2 formulas (pure, JVM). */
 class SurusFormulTest {
@@ -17,7 +15,7 @@ class SurusFormulTest {
     fun tekerAcisalHizi_vBolu0316() {
         assertEquals(10f / 0.316f, SurusFormul.gercekAcisalHiz(10f), 1e-4f)
         // up to 30 km/h the shown speed is the real one
-        for (k in listOf(1f, 5f, 12f, 20f, 29.9f, 30f)) {
+        for (k in listOf(1f, 5f, 12f, 20f, 29.9f)) { // below 30 km/h: the real speed
             assertEquals("$k km/sa", ms(k) / 0.316f, SurusFormul.gosterilenAcisalHiz(ms(k)), 1e-4f)
         }
     }
@@ -39,22 +37,16 @@ class SurusFormulTest {
     @Test
     fun bulanikSprite_ucteBirVeEnAz09SnTur() {
         val enCok = (2 * PI / 0.9).toFloat()
-        for (k in listOf(45f, 50f, 90f, 130f, 180f)) {
+        // from 30 km/h (sprite 1 fully shown, b ≥ 1) the design's cap
+        for (k in listOf(30f, 38f, 45f, 50f, 90f, 130f, 180f)) {
             val v = ms(k)
             val beklenen = minOf(v / 0.316f / 3f, enCok)
             assertEquals("$k km/sa", beklenen, SurusFormul.gosterilenAcisalHiz(v), 1e-4f)
             assertTrue("$k: en çok gerçek hızın 1/3'ü", SurusFormul.gosterilenAcisalHiz(v) <= v / 0.316f / 3f + 1e-4f)
             val turSn = 2 * PI / SurusFormul.gosterilenAcisalHiz(v)
             assertTrue("$k: en az 0,9 sn/tur ($turSn)", turSn >= 0.9 - 1e-5)
-        }
-        // 30–45: eases from the real speed to the cap, never a step
-        var onceki = SurusFormul.gosterilenAcisalHiz(ms(30f))
-        var k = 30.1f
-        while (k <= 45f) {
-            val w = SurusFormul.gosterilenAcisalHiz(ms(k))
-            assertTrue("$k km/sa sıçrama yok", abs(w - onceki) < 0.5f)
-            onceki = w
-            k += 0.1f
+            val kareDerece = Math.toDegrees(SurusFormul.gosterilenAcisalHiz(v) / 30.0)
+            assertTrue("$k: 30 fps'te karede < 36° ($kareDerece)", kareDerece < 36.0)
         }
     }
 
@@ -98,15 +90,15 @@ class SurusFormulTest {
 
     @Test
     fun lamba_her35mdeBir_ilk18Yuzde() {
-        assertEquals(-0.40f, SurusFormul.lambaKonumu(0.0)!!, 1e-6f)
-        assertEquals(0.35f, SurusFormul.lambaKonumu(35.0 * 0.09)!!, 1e-5f)
-        assertNull("süpürme bitti", SurusFormul.lambaKonumu(35.0 * 0.18))
-        assertNull(SurusFormul.lambaKonumu(20.0))
-        assertNotNull("35 m sonra yeniden", SurusFormul.lambaKonumu(35.0))
-        assertEquals(-0.40f, SurusFormul.lambaKonumu(70.0)!!, 1e-5f)
+        assertEquals(-0.40f, SurusFormul.lambaKonumu(0.0), 1e-6f)
+        assertEquals(0.35f, SurusFormul.lambaKonumu(35.0 * 0.09), 1e-5f)
+        assertTrue("süpürme bitti", SurusFormul.lambaKonumu(35.0 * 0.18).isNaN())
+        assertTrue(SurusFormul.lambaKonumu(20.0).isNaN())
+        assertFalse("35 m sonra yeniden", SurusFormul.lambaKonumu(35.0).isNaN())
+        assertEquals(-0.40f, SurusFormul.lambaKonumu(70.0), 1e-5f)
         // the band covers 6.3 m of every 35 m
         var gorunen = 0
-        for (i in 0 until 3500) if (SurusFormul.lambaKonumu(i / 100.0) != null) gorunen++
+        for (i in 0 until 3500) if (!SurusFormul.lambaKonumu(i / 100.0).isNaN()) gorunen++
         assertEquals(630, gorunen)
     }
 

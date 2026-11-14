@@ -100,20 +100,25 @@ object SurusFormul {
         else -> 2f
     }
 
+    /** The blurred-rim cap applies from this speed up (sprite 1 fully opaque, b ≥ 1)... */
+    const val TAVAN_GIRIS_KMH = YARI_KMH
+
+    /** ...and is left again below this one (hysteresis: GPS noise around 30 must not pulse the wheel). */
+    const val TAVAN_CIKIS_KMH = 28f
+
+    /** The switch between real speed and cap is eased with a first-order lag of this time constant. */
+    const val TAVAN_GECIS_SN = 0.25f
+
     /**
-     * Shown wheel angular speed, rad/s (positive; the wheel turns counter-clockwise because the
-     * car moves to the left). Up to 30 km/h the real speed (sprites 0 and 1); while sprite 2 fades
-     * in (30–45 km/h) it eases from the real speed to the blurred cap by the same share; from
-     * 45 km/h only the cap. The demo switches to the cap at 30 km/h in one step (its speed
-     * jumps); a gliding GPS speed would show that as a visible jolt of the wheel.
+     * Target wheel angular speed, rad/s (positive; the wheel turns counter-clockwise because the
+     * car moves to the left), with the cap switched on ([tavanda]): up to 30 km/h the real speed
+     * (sharp sprite and the light-blur sprite fading in); from 30 km/h (b ≥ 1, a blurred sprite
+     * fully shown) the design's cap min(real / 3, one turn per 0.9 s) — at 30 fps that is at most
+     * 13.3° per frame, so no wagon-wheel illusion. [SurusModeli] eases the switch (τ 0.25 s) so the
+     * wheel never jolts; this function is the steady state.
      */
-    fun gosterilenAcisalHiz(v: Float): Float {
-        val b = bulaniklik(kmh(v))
-        val gercek = gercekAcisalHiz(v)
-        if (b <= 1f) return gercek
-        val t = b - 1f
-        return gercek + (bulanikAcisalHiz(v) - gercek) * t
-    }
+    fun gosterilenAcisalHiz(v: Float, tavanda: Boolean = bulaniklik(kmh(v)) >= 1f): Float =
+        if (tavanda) bulanikAcisalHiz(v) else gercekAcisalHiz(v)
 
     /** Near lane line speed, px/s (to the right). */
     fun yakinSeritHizi(v: Float): Float = v * PX_M
@@ -146,12 +151,12 @@ object SurusFormul {
     fun isikOpakligi(kmh: Float): Float = ISIK_DURAN_OPAKLIK + (1f - ISIK_DURAN_OPAKLIK) * hareketPayi(kmh)
 
     /**
-     * Lamp band left edge as a share of the body box width, or null when no band is on the body
-     * (82 % of every 35 m). [mesafeM] is the distance driven.
+     * Lamp band left edge as a share of the body box width, or NaN when no band is on the body
+     * (82 % of every 35 m; NaN, not null: no boxing per frame). [mesafeM] is the distance driven.
      */
-    fun lambaKonumu(mesafeM: Double): Float? {
+    fun lambaKonumu(mesafeM: Double): Float {
         val faz = (mesafeM.mod(LAMBA_ARALIK_M.toDouble()) / LAMBA_ARALIK_M).toFloat()
-        if (faz >= LAMBA_SUPURME) return null
+        if (faz >= LAMBA_SUPURME) return Float.NaN
         return LAMBA_BAS + (LAMBA_SON - LAMBA_BAS) * (faz / LAMBA_SUPURME)
     }
 

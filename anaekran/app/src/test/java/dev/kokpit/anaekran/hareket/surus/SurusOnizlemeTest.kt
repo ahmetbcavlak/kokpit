@@ -50,8 +50,8 @@ class SurusOnizlemeTest {
             setImageResource(R.drawable.boya_gece)
         }
         val s = SurusSahnesi(a, kaynak) { 0L }
-        s.hizSaglayici = { hiz }
-        s.durgunSaglayici = { hiz == 0f }
+        s.hizSaglayici = HizSaglayici { hiz }
+        s.durgunSaglayici = DurgunSaglayici { hiz == 0f }
         s.varliklariKur(SurusVarliklari.coz(a.resources))
         kok.addView(arka, FrameLayout.LayoutParams(768, 1024))
         kok.addView(s, FrameLayout.LayoutParams(768, 1024))
@@ -84,13 +84,13 @@ class SurusOnizlemeTest {
         hiz = 50f / 3.6f
         ilerle(4.0)
         // a moment without the lamp band, then one with the band mid-body
-        while (s.model.lambaKonumu != null) ilerle(1.0 / 60)
+        while (!s.model.lambaKonumu.isNaN()) ilerle(1.0 / 60)
         cek("hiz-50")
-        while ((s.model.lambaKonumu ?: -1f) < 0.3f) ilerle(1.0 / 60)
+        while (s.model.lambaKonumu.isNaN() || s.model.lambaKonumu < 0.3f) ilerle(1.0 / 60)
         cek("hiz-50-lamba")
         hiz = 130f / 3.6f
         ilerle(5.0)
-        while (s.model.lambaKonumu != null) ilerle(1.0 / 60)
+        while (!s.model.lambaKonumu.isNaN()) ilerle(1.0 / 60)
         cek("hiz-130")
         assertTrue(File(cikti, "hiz-130.png").length() > 10_000)
     }

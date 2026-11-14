@@ -66,7 +66,7 @@ class SurusSahnesi(
      * call). Other readers on the same frame (the speed digits, the arc) must not call it again:
      * they take the value through [kareDinleyici] / [sonHizMs].
      */
-    var hizSaglayici: ((Long) -> Float)? = null
+    var hizSaglayici: HizSaglayici? = null
 
     /**
      * Told after every drawn frame with its frame time and the speed read from [hizSaglayici]
@@ -74,7 +74,7 @@ class SurusSahnesi(
      * Not called while the loop is stopped (still scene: the last value holds) or on frames
      * skipped at half rate.
      */
-    var kareDinleyici: ((zamanNs: Long, hizMs: Float) -> Unit)? = null
+    var kareDinleyici: KareDinleyici? = null
 
     /** The speed read on the last drawn frame, m/s (see [kareDinleyici]). */
     var sonHizMs = 0f
@@ -84,7 +84,7 @@ class SurusSahnesi(
      * True when the speed source is at rest and will not change by itself (normally
      * `Hiz.yumusatici::durgun`). Null: "at rest" whenever the speed is 0.
      */
-    var durgunSaglayici: ((Long) -> Boolean)? = null
+    var durgunSaglayici: DurgunSaglayici? = null
 
     /** Told when the scene starts / stops moving (frame-rate counter). */
     var izci: HareketIzci? = null
@@ -101,9 +101,22 @@ class SurusSahnesi(
     /** 60/30 fps decision (diagnostics: [KareTemposu.yariHiz]). */
     val tempo = KareTemposu()
 
-    /** Bitmaps are in place. */
+    /**
+     * Bitmaps are in place. Until then the scene draws no car (only lines and lights): keep it
+     * INVISIBLE until [hazirOlunca] fires (decoding takes ≈ 50–100 ms after [varliklariYukle]).
+     */
     var hazir = false
         private set
+
+    /** Called once when the bitmaps are in place; at once if they already are. */
+    var hazirOlunca: (() -> Unit)? = null
+        set(value) {
+            field = value
+            if (hazir && value != null) {
+                field = null
+                value()
+            }
+        }
 
     /** A frame callback is pending (tests). */
     val donguBekliyor: Boolean get() = bekliyor
@@ -134,6 +147,9 @@ class SurusSahnesi(
     private var rampaNs = 0L
     private var rampaBasNs = YOK
 
+    /** Current ramp value 0…1 (1 = no ramp): multiplies the speed and the lines' / lights' alpha. */
+    private var rampaDegeri = 1f
+
     private val geriCagri = Choreographer.FrameCallback { t ->
         bekliyor = false
         kare(t)
@@ -142,7 +158,7 @@ class SurusSahnesi(
     private val yoklama = object : Runnable {
         override fun run() {
             if (!calisiyor || bekliyor) return
-            if (durgunSaglayici?.invoke(saat()) == false) iste() else ana.postDelayed(this, YOKLAMA_MS)
+            if (durgunSaglayici?.durgun(saat()) == false) iste() else ana.postDelayed(this, YOKLAMA_MS)
         }
     }
 
@@ -203,6 +219,10 @@ class SurusSahnesi(
         hazir = true
         uygula()
         arka.invalidate()
+        hazirOlunca?.let {
+            hazirOlunca = null
+            it()
+        }
     }
 
     /** Decodes the bitmaps on the worker thread and puts them in (idempotent). */
@@ -240,12 +260,15 @@ class SurusSahnesi(
      * The scene appears over a still picture of the car (the end of the park → drive clip):
      * start from the rest look (camera 1, no suspension) and bring the speed in over [sureMs]
      * (smoothstep), so the first frame equals the clip's last one and the car then picks up the
-     * real speed. Lane lines and wheel angle keep their positions.
+     * real speed. First frame: wheel angle 0 and distance 0 (the sprites' and the lamp band's
+     * rest pose), camera 1, and the lines, lights (and speed lines, speed 0) at alpha 0 — none of
+     * them is in the clip; they fade in with the same ramp.
      */
     fun durgundanBasla(sureMs: Long = RAMPA_MS) {
         model.dinlenmeyeAl()
         rampaNs = sureMs * 1_000_000L
         rampaBasNs = BEKLIYOR
+        rampaDegeri = 0f
         uygula()
         uyandir()
     }
@@ -258,6 +281,8 @@ class SurusSahnesi(
         govde.setImageDrawable(null)
         for (v in tekerOn + tekerArka) v.setImageDrawable(null)
         arka.isik = null
+        yansima.govdeBirak()
+        hazirOlunca = null
     }
 
     override fun onVisibilityAggregated(isVisible: Boolean) {
@@ -314,16 +339,22 @@ class SurusSahnesi(
         }
         val dt = if (sonNs == YOK) 0f else ((t - sonNs) / 1e9f).coerceIn(0f, DT_EN_COK)
         sonNs = t
-        val ham = (hizSaglayici?.invoke(t) ?: 0f).let { if (it.isNaN()) 0f else it.coerceAtLeast(0f) }
+        val s = hizSaglayici
+        val okunan = if (s == null) 0f else s.hiz(t)
+        val ham = if (okunan.isNaN()) 0f else okunan.coerceAtLeast(0f)
         sonHizMs = ham
-        model.ilerle(dt, ham * rampa(t))
+        rampaDegeri = rampa(t)
+        model.ilerle(dt, ham * rampaDegeri)
         uygula()
-        kareDinleyici?.invoke(t, ham)
-        val durgun = model.durgun && rampaBasNs == YOK && (durgunSaglayici?.invoke(t) ?: true)
+        kareDinleyici?.kare(t, ham)
+        val d = durgunSaglayici
+        val durgun = model.durgun && rampaBasNs == YOK && (d == null || d.durgun(t))
         if (durgun) {
-            // Still: stop waking up every VSYNC; the poll / uyandir() restart it.
+            // Still: stop waking up every VSYNC; the poll / uyandir() restart it. The gap until
+            // then must not count as a slow frame.
             izKapa()
             sonNs = YOK
+            tempo.sifirla()
             ana.removeCallbacks(yoklama)
             if (durgunSaglayici != null) ana.postDelayed(yoklama, YOKLAMA_MS)
         } else {
@@ -357,19 +388,34 @@ class SurusSahnesi(
         tekerUygula(tekerOn, b, r)
         tekerUygula(tekerArka, b, r)
 
-        arka.isikOfset = m.isikOfset
-        arka.isikOpakligi = m.isikOpakligi
-        arka.uzakOfset = m.uzakOfset
-        arka.invalidate()
-        on.ofset = m.yakinOfset
-        on.invalidate()
-        iz.alpha = m.izOpakligi
+        // Lines and lights: re-record only when what they draw changed.
+        val io = m.isikOfset
+        val iop = m.isikOpakligi
+        val uo = m.uzakOfset
+        if (io != arka.isikOfset || iop != arka.isikOpakligi || uo != arka.uzakOfset) {
+            arka.isikOfset = io
+            arka.isikOpakligi = iop
+            arka.uzakOfset = uo
+            arka.invalidate()
+        }
+        val yo = m.yakinOfset
+        if (yo != on.ofset) {
+            on.ofset = yo
+            on.invalidate()
+        }
+        val g = rampaDegeri
+        arka.alpha = g
+        on.alpha = g
+        iz.alpha = m.izOpakligi * g
 
         val onceki = yansima.ciziyor
-        yansima.konum = m.lambaKonumu
-        yansima.gorunurluk = m.lambaGorunurlugu
-        // Re-record only while a band is (or was, to clear it) on the body.
-        if (yansima.ciziyor || onceki) yansima.invalidate()
+        val lk = m.lambaKonumu
+        val lg = m.lambaGorunurlugu
+        val degisti = lk.toBits() != yansima.konum.toBits() || lg != yansima.gorunurluk
+        yansima.konum = lk
+        yansima.gorunurluk = lg
+        // Re-record only while a band is (or was, to clear it) on the body, and it moved.
+        if (degisti && (yansima.ciziyor || onceki)) yansima.invalidate()
     }
 
     private fun tekerUygula(v: Array<ImageView>, b: Float, r: Float) {
@@ -438,6 +484,8 @@ class SurusSahnesi(
     internal val tekerArkaGorunumleri: Array<ImageView> get() = tekerArka
     internal val yansimaGorunumu: YansimaKatmani get() = yansima
     internal val izGorunumu: View get() = iz
+    internal val arkaGorunumu: View get() = arka
+    internal val onGorunumu: View get() = on
 
     companion object {
         /** Longest frame step, s (research decision 8). */

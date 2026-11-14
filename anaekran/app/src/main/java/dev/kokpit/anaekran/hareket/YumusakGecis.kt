@@ -21,6 +21,12 @@ import dev.kokpit.anaekran.ekran.Gecis
  * A new [gec] while one runs first finishes the running one at once (animations ended, end
  * state applied, its `bitti` called), then starts — so rapid calls never leave a view
  * half-faded, even if the caller ignores `bitti`. Main thread only.
+ *
+ * Touches: dokunma süzmesi çağıranın işi (touch filtering is the caller's job). During the
+ * 1.1 s the old view is still VISIBLE (fading out) and the new one is VISIBLE at alpha 0 for its
+ * first 0.2 s; both would receive touches. This class only animates; the screen container
+ * (EkranYoneticisi's `kap`, step 3) must route touches to the current screen alone, e.g. in its
+ * dispatchTouchEvent. [suruyor] tells whether a transition runs.
  */
 class YumusakGecis(
     /** Rise of the new view in device pixels (design [Zamanlama.ARAYUZ_KAYMA_PX] px). */
