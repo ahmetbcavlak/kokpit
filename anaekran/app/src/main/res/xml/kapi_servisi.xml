@@ -9,10 +9,15 @@
   - notificationTimeout 0 (as Keşif 0.6, which caught the door popup on the car this way): with a delay
     the system keeps only the last pending event of a type, so another app's window event could replace
     the door popup's.
+  - typeViewClicked (0.2.2): only to notice a click in com.hcn.autocan's popup (its X), so the popup
+    leaving afterwards counts as "closed by the user" (door state unknown), not "door closed". Clicks of
+    other apps are dropped in code before anything of theirs is read. No flagReportViewIds: the window
+    and time of the click are the criterion, not the view's id.
+  - 0.2.2: when the vendor's system properties can be read (KapiOzellikleri), the service only logs.
   - No canPerformGestures, no canRequestEnhancedWebAccessibility, no touch exploration, no key filtering.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeViewClicked"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"

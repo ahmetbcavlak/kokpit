@@ -95,6 +95,16 @@ object KapiMetni {
  * decision 7): from [ZAMAN_ASIMI_MS] after their last event, the next pass drops them. A record
  * confirmed by the list never times out, so a door that stays open is not called closed by a timer
  * (Keşif 0.6 saw the popup open and close through the window list on the car).
+ *
+ * Closed by the user (0.2.2 fix): the popup has a close (X) button, and a popup the user closed says
+ * nothing about the door, which may still be open. A com.hcn.autocan TYPE_VIEW_CLICKED in a window
+ * ([tiklama]) followed within [KAPATMA_MS] by that window leaving the list counts as "closed by the
+ * user": its flags go back to unknown (null), not to closed (false), so no "Kapı kapandı." follows.
+ * The criterion is the click's window and time only: Keşif 0.7's UI dump of the button's view id was
+ * not carried into the code or the guide, so no id or position is matched (the click's class and text
+ * go to the diagnostics, for a narrower criterion later). A click whose window id is unknown (-1 or a
+ * window not seen) counts for every door window of the package. Any click is enough: a popup that
+ * closes by itself within 1.5 s of an unrelated click in it becomes "unknown", the safe side.
  */
 class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealtime() }) {
 
@@ -109,6 +119,8 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
     private var sonListe: Set<Int> = emptySet()
     private var kapiGoruldu = false
     private var bagajGoruldu = false
+    /** Window id → time of the last com.hcn.autocan click in it; [HER_PENCERE] for a click of unknown window. */
+    private val tiklamalar = HashMap<Int, Long>()
 
     /** Door: true = a "Kapı açık" popup is open, false = it was seen and has closed, null = never seen. */
     fun kapiAcik(): Boolean? = when {
@@ -154,6 +166,21 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
     }
 
     /**
+     * TYPE_VIEW_CLICKED. Returns false when the event is not com.hcn.autocan's (ignored). Only the time
+     * is kept; the record's flags change when (and if) the window then leaves the list.
+     */
+    fun tiklama(paket: CharSequence?, pencereId: Int): Boolean {
+        if (paket?.toString() != KapiMetni.PAKET) return false
+        val bilinen = pencereId >= 0 && (pencereId in kayitlar || pencereId in sonListe)
+        tiklamalar[if (bilinen) pencereId else HER_PENCERE] = saat()
+        return true
+    }
+
+    /** A click in window [id] (or of unknown window) at most [KAPATMA_MS] before [simdi]. */
+    private fun yeniTiklandi(id: Int, simdi: Long): Boolean =
+        listOfNotNull(tiklamalar[id], tiklamalar[HER_PENCERE]).any { simdi - it in 0..KAPATMA_MS }
+
+    /**
      * The result of one getWindows() pass. [okunamayan]: ids whose root node was briefly not
      * available; their records are kept as they are (not taken as closed).
      */
@@ -172,13 +199,25 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
             val (id, k) = it.next()
             if (id in gorulen || id in okunamayan) continue
             when {
-                k.listede -> it.remove() // was on screen, is gone: closed
+                k.listede && yeniTiklandi(id, simdi) -> {
+                    // Closed by the user (X): the door/boot it showed is unknown now, not closed.
+                    it.remove()
+                    if (k.okunan.kapi) kapiGoruldu = false
+                    if (k.okunan.bagaj) bagajGoruldu = false
+                    Teshis.kullaniciKapatti++
+                    Teshis.kapiOlayi("pencere $id kullanıcı kapattı → bilinmiyor")
+                }
+                k.listede -> it.remove() // was on screen, is gone by itself: closed
                 simdi - k.sonOlay >= ZAMAN_ASIMI_MS -> {
                     it.remove()
                     Teshis.kapiZamanAsimi++
                 }
                 listeDisiSayilan.add(id) -> Teshis.listeDisiPencere++
             }
+        }
+        // Clicks are only kept for windows still on screen (and the package-wide one while it is fresh).
+        tiklamalar.entries.removeAll { (id, t) ->
+            if (id == HER_PENCERE) simdi - t > KAPATMA_MS else id !in gorulen && id !in okunamayan
         }
     }
 
@@ -189,6 +228,7 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
         sonListe = emptySet()
         kapiGoruldu = false
         bagajGoruldu = false
+        tiklamalar.clear()
     }
 
     /** For diagnostics: "id:kapı/bagaj:sınıf:listede". */
@@ -200,5 +240,8 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
     companion object {
         /** Unconfirmed (never listed) records go this long after their last event. */
         const val ZAMAN_ASIMI_MS = 10_000L
+        /** A window that leaves the list this soon after a click in it was closed by the user. */
+        const val KAPATMA_MS = 1_500L
+        private const val HER_PENCERE = Int.MIN_VALUE
     }
 }

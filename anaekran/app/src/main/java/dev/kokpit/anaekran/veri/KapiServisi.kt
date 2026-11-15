@@ -25,6 +25,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * flagIncludeNotImportantViews: it widens the node tree; if the car shows the popup text cannot be
  * read, 0.2 adds it.
  *
+ * 0.2.2 (K-116): once the vendor's system properties can be read ([KapiOzellikleri.birincil]), they are
+ * the door source and this service writes no door state any more; it keeps interpreting and logging
+ * to [Teshis] only. While they cannot be read, it writes exactly as in 0.2, with one fix: a popup the
+ * user closed with its X gives "unknown", not "closed" (TYPE_VIEW_CLICKED, see [KapiYorumlayici]).
+ * Click events come from every app as well (no packageNames); anything not com.hcn.autocan's is dropped
+ * at once, on the binder thread, before any of its content is looked at.
+ *
  * Runs on its own, bound by the system, independent of the Activity's life cycle. Same process as the
  * app, so it writes through [AracVerisi.guncelle], which moves the write to the main looper (decision 8).
  * Fetching nodes is a blocking call into the other app, so that work runs on one worker thread, in order.
@@ -64,6 +71,8 @@ class KapiServisi : AccessibilityService() {
         sifirlayici = kendiSifirlayicisi
         Teshis.kapiServisiBagli = true
         Teshis.kapiOlayi("servis bağlandı")
+        // Checked when the block runs (main): the properties may have taken over meanwhile.
+        AracVerisi.guncelle { if (!KapiOzellikleri.birincil) kapiKaynagi(KapiKaynagi.ERISILEBILIRLIK) }
         // A popup already on screen is picked up at once. No popup leaves both flags unknown (null):
         // its absence says nothing about a door that was never seen open.
         taramaIste()
@@ -90,8 +99,22 @@ class KapiServisi : AccessibilityService() {
                     // Always a pass after this event: confirms it and reads node text the event lacked.
                     taramaIste()
                 }
+                AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                    val paket = e.packageName?.toString()
+                    if (paket != KapiMetni.PAKET) return
+                    // Copied before the event is recycled: window id, class and text only (no getSource()).
+                    val id = e.windowId
+                    val sinif = e.className?.toString().orEmpty()
+                    val metin = (ArrayList<CharSequence?>(e.text).apply { add(e.contentDescription) })
+                        .filterNotNull().joinToString(" | ")
+                    calistir {
+                        yorumlayici.tiklama(paket, id)
+                        Teshis.kapiOlayi("tıklama $id $sinif \"$metin\"")
+                    }
+                    taramaIste()
+                }
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED -> taramaIste()
-                else -> Unit // only the two types above are subscribed (res/xml/kapi_servisi.xml)
+                else -> Unit // only the three types above are subscribed (res/xml/kapi_servisi.xml)
             }
         } catch (t: Throwable) {
             Teshis.hata("kapı olayı", t)
@@ -157,6 +180,8 @@ class KapiServisi : AccessibilityService() {
     private fun yaz() {
         val n = nesil
         if (n != etkinNesil) return
+        // The properties are the source: this service only logs (checked again on main below).
+        if (KapiOzellikleri.birincil) return
         // Values are taken here, on the worker; the block only hands them over (it runs later on main).
         val kapi = yorumlayici.kapiAcik()
         val bagaj = yorumlayici.bagajAcik()
@@ -165,9 +190,10 @@ class KapiServisi : AccessibilityService() {
         sonBagaj = bagaj
         AracVerisi.guncelle {
             // Checked again on main: the service may have been destroyed after the post.
-            if (n == etkinNesil) {
+            if (n == etkinNesil && !KapiOzellikleri.birincil) {
                 kapiAcik(kapi)
                 bagajAcik(bagaj)
+                kapiKaynagi(KapiKaynagi.ERISILEBILIRLIK)
             }
         }
     }
@@ -216,7 +242,7 @@ class KapiServisi : AccessibilityService() {
             Teshis.kapiOlayi("uygulama içi sıfırlama")
             val n = nesil
             AracVerisi.guncelle {
-                if (n == etkinNesil) {
+                if (n == etkinNesil && !KapiOzellikleri.birincil) {
                     kapiAcik(null)
                     bagajAcik(null)
                 }
@@ -235,8 +261,12 @@ class KapiServisi : AccessibilityService() {
         Teshis.kapiOlayi("servis durdu")
         calistir { yorumlayici.sifirla() }
         AracVerisi.guncelle {
-            kapiAcik(null)
-            bagajAcik(null)
+            // With the properties as source the door state does not depend on this service.
+            if (!KapiOzellikleri.birincil) {
+                kapiAcik(null)
+                bagajAcik(null)
+                kapiKaynagi(KapiKaynagi.YOK)
+            }
         }
         isci?.quitSafely()
         isci = null
@@ -257,13 +287,18 @@ class KapiServisi : AccessibilityService() {
 
         /**
          * Clears the door/boot state inside the app (any thread): the running service's records, if it
-         * is connected, and the shared state's kapiAcik/bagajAcik (→ null, unknown). Sends nothing.
+         * is connected, and the shared state's kapiAcik/bagajAcik/kapilar (→ null, unknown). With the
+         * properties as source, their next pass (≤ 250 ms while the app is in front) writes the current
+         * values again. Sends nothing.
          */
         fun uygulamaIciSifirla() {
             sifirlayici?.run()
             AracVerisi.guncelle {
                 kapiAcik(null)
                 bagajAcik(null)
+                kapilar(AracDurumu.KAPILAR_BILINMIYOR)
+                // Set where the nulls land (main), so the properties' rewrite always comes after them.
+                KapiOzellikleri.yenidenYaz = true
             }
         }
     }

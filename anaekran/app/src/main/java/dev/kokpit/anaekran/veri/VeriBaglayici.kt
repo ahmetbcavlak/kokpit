@@ -16,9 +16,11 @@ import dev.kokpit.anaekran.Katmanlar
  *  - every GPS speed also goes into [Hiz.yumusatici] (smoothed speed for the frame loop, see [HizYumusatici]);
  *    it is reset when GPS stops.
  *  - basla (onResume): starts GPS if permitted. The permission dialog pauses and resumes the Activity,
- *    so a fresh grant is picked up here.
- *  - dur (onPause): stops GPS (the climate receiver stays: values are current when the app returns).
- *  - birak (onDestroy): stops GPS and unregisters the receiver.
+ *    so a fresh grant is picked up here. Starts the door properties ([KapiOzellikleri]) with a read at once.
+ *  - dur (onPause): stops GPS and the door properties (the climate receiver stays: values are current
+ *    when the app returns). A door warning does not matter while another app is in front; the read at
+ *    the next basla makes it right on return, and 4 reads a second in the background would be waste.
+ *  - birak (onDestroy): stops GPS and the door properties (worker thread ended), unregisters the receiver.
  *
  * The door service ([KapiServisi]) is not started here: the system binds it on its own once the user
  * has switched it on, independent of the Activity. Nothing here sends anything to the car.
@@ -27,10 +29,15 @@ class VeriBaglayici : Baglayici {
 
     private var klima: KlimaKaynagi? = null
     private var hiz: HizKaynagi? = null
+    private var kapi: KapiOzellikleri? = null
 
     /** For tests. */
     internal val klimaKaynagi: KlimaKaynagi? get() = klima
     internal val hizKaynagi: HizKaynagi? get() = hiz
+    internal val kapiOzellikleri: KapiOzellikleri? get() = kapi
+
+    /** Tests replace the door-property reader (fake properties, recorded schedule). */
+    internal var kapiOzellikUretici: (Context) -> KapiOzellikleri = { KapiOzellikleri(it) }
 
     override fun kur(activity: Activity, katmanlar: Katmanlar) = hazirla(activity)
 
@@ -43,6 +50,8 @@ class VeriBaglayici : Baglayici {
             { izinVar(uyg) },
             yumusatici = Hiz.yumusatici,
         )
+        kapi?.birak()
+        kapi = kapiOzellikUretici(uyg)
         val izin = izinVar(uyg)
         Teshis.konumIzni = izin
         if (izin) return
@@ -60,17 +69,21 @@ class VeriBaglayici : Baglayici {
 
     override fun basla() {
         hiz?.basla()
+        kapi?.basla()
     }
 
     override fun dur() {
         hiz?.dur()
+        kapi?.dur()
     }
 
     override fun birak() {
         hiz?.dur()
         klima?.dur()
+        kapi?.birak()
         klima = null
         hiz = null
+        kapi = null
     }
 
     companion object {

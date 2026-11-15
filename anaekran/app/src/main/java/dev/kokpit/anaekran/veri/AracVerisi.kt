@@ -81,6 +81,11 @@ object AracVerisi {
         fun klima(k: Klima?) { sonuc = sonuc.copy(klima = k, klimaZamani = simdi) }
         fun kapiAcik(a: Boolean?) { sonuc = sonuc.copy(kapiAcik = a, kapiAcikZamani = simdi) }
         fun bagajAcik(a: Boolean?) { sonuc = sonuc.copy(bagajAcik = a, bagajAcikZamani = simdi) }
+        /** Four doors (front left, front right, rear left, rear right); any other size counts as unknown. */
+        fun kapilar(k: List<Boolean?>) {
+            sonuc = sonuc.copy(kapilar = if (k.size == 4) k.toList() else AracDurumu.KAPILAR_BILINMIYOR, kapilarZamani = simdi)
+        }
+        fun kapiKaynagi(k: KapiKaynagi) { sonuc = sonuc.copy(kapiKaynagi = k) }
         fun disSicaklik(c: Double?) { sonuc = sonuc.copy(disSicaklik = c, disSicaklikZamani = simdi) }
         fun hiz(kmh: Double?) { sonuc = sonuc.copy(hiz = kmh, hizZamani = simdi) }
         fun hareketHali(h: HareketHali?) { sonuc = sonuc.copy(hareketHali = h, hareketHaliZamani = simdi) }
@@ -101,6 +106,7 @@ object AracVerisi {
                 klimaZamani = if (d.klima != null) simdi else 0L,
                 kapiAcikZamani = if (d.kapiAcik != null) simdi else 0L,
                 bagajAcikZamani = if (d.bagajAcik != null) simdi else 0L,
+                kapilarZamani = if (d.kapilar.any { it != null }) simdi else 0L,
                 disSicaklikZamani = if (d.disSicaklik != null) simdi else 0L,
                 hizZamani = if (d.hiz != null) simdi else 0L,
                 hareketHaliZamani = if (d.hareketHali != null) simdi else 0L,

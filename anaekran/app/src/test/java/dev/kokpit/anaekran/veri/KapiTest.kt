@@ -31,6 +31,7 @@ class KapiTest {
 
     @Before
     fun hazirla() {
+        KapiOzellikleri.testSifirla() // the properties are not the source here: the 0.2 path writes
         KapiServisi.yurutucu = Executor { it.run() }
         KapiServisi.gecikmeli = { _, r -> gecikenler += r }
     }
@@ -41,6 +42,7 @@ class KapiTest {
         KapiServisi.gecikmeli = null
         AracVerisi.sifirla()
         Teshis.sifirla()
+        KapiOzellikleri.testSifirla()
     }
 
     private fun bosalt() = shadowOf(Looper.getMainLooper()).idle()
@@ -183,6 +185,101 @@ class KapiTest {
         y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Bagaj açık"), 7)
         assertEquals(false, y.kapiAcik())
         assertEquals(true, y.bagajAcik())
+    }
+
+    // --- Closed by the user (X) vs. the door closing (0.2.2) ---
+
+    @Test
+    fun yorumlayici_XileKapatilinca_bilinmiyor() {
+        var t = 0L
+        val y = KapiYorumlayici { t }
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        assertEquals(true, y.kapiAcik())
+        t = 1_000
+        assertTrue(y.tiklama(AUTOCAN, 7))
+        t = 1_800 // gone 0.8 s after the click
+        y.pencereler(emptyList())
+        assertNull(y.kapiAcik()) // the door may still be open: unknown, not closed
+        assertEquals(1, Teshis.kullaniciKapatti)
+    }
+
+    @Test
+    fun yorumlayici_tiklamadanGecKapaninca_kapandi() {
+        var t = 0L
+        val y = KapiYorumlayici { t }
+        y.pencereler(listOf(p(7, "Kapı açık"), p(8, "Bagaj açık")))
+        t = 1_000
+        y.tiklama(AUTOCAN, 7)
+        t = 2_501 // 1.501 s later: the popup went by itself
+        y.pencereler(emptyList())
+        assertEquals(false, y.kapiAcik())
+        assertEquals(false, y.bagajAcik())
+        assertEquals(0, Teshis.kullaniciKapatti)
+
+        // A click in another app does not count; neither does a click in another autocan window.
+        y.pencereler(listOf(p(9, "Kapı açık"), p(10, "Bagaj açık")))
+        assertFalse(y.tiklama(BASKA, 9))
+        y.tiklama(AUTOCAN, 10)
+        t = 3_000
+        y.pencereler(listOf(p(10, "Bagaj açık")))
+        assertEquals(false, y.kapiAcik()) // window 9 closed by itself
+        y.pencereler(emptyList())
+        assertNull(y.bagajAcik()) // window 10 closed by its X
+    }
+
+    @Test
+    fun yorumlayici_penceresiBilinmeyenTiklama_hepsineSayilir() {
+        var t = 0L
+        val y = KapiYorumlayici { t }
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        y.tiklama(AUTOCAN, -1)
+        t = 500
+        y.pencereler(emptyList())
+        assertNull(y.kapiAcik())
+        // Not kept beyond its 1.5 s.
+        y.pencereler(listOf(p(8, "Kapı açık")))
+        t = 2_100
+        y.pencereler(emptyList())
+        assertEquals(false, y.kapiAcik())
+    }
+
+    @Test
+    fun servis_XeBasilincaBilinmiyor_kendiligindenKapanincaKapandi() {
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        val sh = shadowOf(s)
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+        assertEquals(KapiKaynagi.ERISILEBILIRLIK, AracVerisi.durum.kapiKaynagi)
+
+        // The user taps the popup's X; the popup goes.
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_VIEW_CLICKED, AUTOCAN, null, 7))
+        sh.setWindows(emptyList())
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, null, null, -1))
+        bosalt()
+        assertNull(AracVerisi.durum.kapiAcik) // not "closed": no "Kapı kapandı."
+        assertTrue(Teshis.kapiOlaylari().any { it.contains("tıklama 7") })
+        assertTrue(Teshis.kapiOlaylari().any { it.contains("kullanıcı kapattı") })
+
+        // Next popup; another app's click and an old click of this one do not count.
+        sh.setWindows(listOf(pencere(9, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 9))
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_VIEW_CLICKED, AUTOCAN, null, 9))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(2_000))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_VIEW_CLICKED, BASKA, null, 9))
+        // The door closes: the vendor takes the popup away by itself.
+        sh.setWindows(emptyList())
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, null, null, -1))
+        bosalt()
+        assertEquals(false, AracVerisi.durum.kapiAcik)
+        assertTrue(Teshis.kapiOlaylari().none { it.contains(BASKA) })
+
+        // Still read only.
+        assertTrue(sh.globalActionsPerformed.isEmpty())
+        assertTrue(sh.gesturesDispatched.isEmpty())
     }
 
     // --- The service with Robolectric's accessibility shadows ---

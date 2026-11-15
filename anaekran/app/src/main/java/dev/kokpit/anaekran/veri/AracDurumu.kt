@@ -3,7 +3,7 @@ package dev.kokpit.anaekran.veri
 /*
  * Vehicle data contract (Ana Ekran 0.1). Only verified signals (K-74):
  * climate (ACTION_AIR_INFO), outside temperature (hcn.air.outdoor_temp), GPS speed,
- * door/boot warning (own AccessibilityService). Every field may be null = "unknown":
+ * door/boot (0.2.2: system properties persist.vendor.cem.cardoor1..5, else own AccessibilityService). Every field may be null = "unknown":
  * the UI shows "—" and never guesses (a missing door signal is NOT "closed").
  *
  * Owner from task 2 on: the data agent may add fields here; keep them nullable with a time.
@@ -38,6 +38,14 @@ data class Klima(
     val buzCozme: Boolean? = null,
 )
 
+/**
+ * Where kapiAcik/bagajAcik/kapilar come from (0.2.2, K-116): OZELLIK = the vendor's system properties
+ * persist.vendor.cem.cardoor1..5 (KapiOzellikleri), ERISILEBILIRLIK = the vendor's popup through our
+ * accessibility service (KapiServisi, the 0.2 path, used only while the properties cannot be read),
+ * YOK = neither is running.
+ */
+enum class KapiKaynagi { OZELLIK, ERISILEBILIRLIK, YOK }
+
 /** Old single door state; kept only for [AracDurumu.kapi] until the screens move to kapiAcik/bagajAcik. */
 enum class KapiDurumu { KAPALI, KAPI_ACIK, BAGAJ_ACIK }
 
@@ -56,14 +64,29 @@ data class AracDurumu(
     val klima: Klima? = null,
     val klimaZamani: Long = 0L,
     /**
-     * Door: true while com.hcn.autocan's "Kapı açık" popup is on screen, false once that popup has
-     * closed, null until the popup has been seen at all (or the door service is off). Says nothing about the boot.
+     * Door (any of the four), by [kapiKaynagi]:
+     *  - OZELLIK: true if any of cardoor1–4 is "2" (open), false if all four are "1" (closed), null if
+     *    some are unknown and none is open.
+     *  - ERISILEBILIRLIK: true while com.hcn.autocan's "Kapı açık" popup is on screen, false once that
+     *    popup has closed by itself, null until it has been seen at all, after the user closed it with
+     *    its X (the door may still be open), or when the door service is off.
+     * Says nothing about the boot.
      */
     val kapiAcik: Boolean? = null,
     val kapiAcikZamani: Long = 0L,
-    /** Boot: the same for the "Bagaj açık" popup. Door and boot may both be open. */
+    /** Boot: cardoor5 (OZELLIK) or the "Bagaj açık" popup (ERISILEBILIRLIK), the same way. Door and boot may both be open. */
     val bagajAcik: Boolean? = null,
     val bagajAcikZamani: Long = 0L,
+    /**
+     * Each door on its own, always four entries: front left, front right, rear left, rear right
+     * (true open, false closed, null unknown). Filled only from the properties (OZELLIK); the popup does
+     * not say which door, so with ERISILEBILIRLIK all four stay null. For a later "which door" view;
+     * no screen reads it in 0.2.2.
+     */
+    val kapilar: List<Boolean?> = KAPILAR_BILINMIYOR,
+    val kapilarZamani: Long = 0L,
+    /** Which source wrote the door fields last (see [KapiKaynagi]). */
+    val kapiKaynagi: KapiKaynagi = KapiKaynagi.YOK,
     /** Outside temperature in °C. */
     val disSicaklik: Double? = null,
     val disSicaklikZamani: Long = 0L,
@@ -94,7 +117,12 @@ data class AracDurumu(
     fun ayniDegerler(o: AracDurumu): Boolean = zamansiz() == o.zamansiz()
 
     private fun zamansiz() = copy(
-        klimaZamani = 0L, kapiAcikZamani = 0L, bagajAcikZamani = 0L,
+        klimaZamani = 0L, kapiAcikZamani = 0L, bagajAcikZamani = 0L, kapilarZamani = 0L,
         disSicaklikZamani = 0L, hizZamani = 0L, hareketHaliZamani = 0L,
     )
+
+    companion object {
+        /** Four unknown doors. */
+        val KAPILAR_BILINMIYOR: List<Boolean?> = listOf(null, null, null, null)
+    }
 }

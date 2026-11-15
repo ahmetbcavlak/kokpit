@@ -53,7 +53,19 @@ object Teshis {
     @Volatile var listeDisiPencere: Int = 0
     /** Never-listed door records dropped by the 10 s time-out (KapiYorumlayici.ZAMAN_ASIMI_MS). */
     @Volatile var kapiZamanAsimi: Int = 0
+    /** Popups that went within 1.5 s of a click in them: taken as closed by the user (X), state unknown. */
+    @Volatile var kullaniciKapatti: Int = 0
     private val kapiOlaylari = ArrayDeque<String>()
+
+    // --- Door properties (KapiOzellikleri) ---
+    /** Last raw cardoor1..5 (null entry = the read failed, "" = not set); null list = never read. */
+    @Volatile var kapiOzellikHam: List<String?>? = null
+    /** "başlamadı", "yansıma", "getprop", "okunamıyor". */
+    @Volatile var kapiOzellikOkuma: String = "başlamadı"
+    /** Last time any of the five raw values changed (0 = never since the first pass). */
+    @Volatile var kapiOzellikDegisim: Long = 0L
+    /** Settings.System can_ignore_doorinfo as read (every 2 s while the app is in front). */
+    @Volatile var canIgnoreDoorinfo: String = "okunmadı"
 
     @Volatile var sonHata: String? = null; private set
 
@@ -98,6 +110,19 @@ object Teshis {
         sonHata = "$nerede: ${t.javaClass.simpleName} ${t.message.orEmpty()}".trim()
     }
 
+    /** One raw property value for the diagnostics: "?" = read failed, "boş" = not set. */
+    fun hamMetin(v: String?): String = when {
+        v == null -> "?"
+        v.isEmpty() -> "boş"
+        else -> v
+    }
+
+    private fun kaynakMetni(k: KapiKaynagi) = when (k) {
+        KapiKaynagi.OZELLIK -> "özellik"
+        KapiKaynagi.ERISILEBILIRLIK -> "erişilebilirlik"
+        KapiKaynagi.YOK -> "yok"
+    }
+
     /** Short Turkish lines for a hidden diagnostics row. */
     fun satirlar(): List<String> {
         val s = simdi()
@@ -113,7 +138,11 @@ object Teshis {
             "GPS hız: ham ${hamHiz?.let { ondalik(it, 2) + " m/sn" } ?: "—"} · doğruluk " +
                 "${hizDogrulugu?.let { ondalik(it, 2) + " m/sn" } ?: "yok"} ($dogrulukluKonumSayisi konumda) · " +
                 yumusatma(),
-            "Kapı servisi: ${if (kapiServisiBagli) "bağlı" else "bağlı değil"} · liste dışı pencere $listeDisiPencere · zaman aşımı $kapiZamanAsimi",
+            "Kapı özellikleri: " + (kapiOzellikHam?.withIndex()?.joinToString(" ") { (i, v) -> "${i + 1}=${hamMetin(v)}" } ?: "1=— 2=— 3=— 4=— 5=—") +
+                " · kaynak ${kaynakMetni(AracVerisi.durum.kapiKaynagi)} · okuma $kapiOzellikOkuma · son değişim ${once(kapiOzellikDegisim)}",
+            "can_ignore_doorinfo: $canIgnoreDoorinfo",
+            "Kapı servisi: ${if (kapiServisiBagli) "bağlı" else "bağlı değil"} · liste dışı pencere $listeDisiPencere · zaman aşımı $kapiZamanAsimi" +
+                " · kullanıcı kapattı $kullaniciKapatti",
         ) + kapiOlaylari().takeLast(5).map { "  $it" } + listOfNotNull(sonHata?.let { "Hata: $it" })
     }
 
@@ -134,7 +163,8 @@ object Teshis {
         yayinAlicisi = "kayıtlı değil"; yapiskanGeldi = false
         konumIzni = null; gps = "başlamadı"; konumSayisi = 0; hizsizKonumSayisi = 0; sonKonumZamani = 0L
         konumAraligi.sifirla(); hamHiz = null; hizDogrulugu = null; dogrulukluKonumSayisi = 0
-        kapiServisiBagli = false; listeDisiPencere = 0; kapiZamanAsimi = 0
+        kapiServisiBagli = false; listeDisiPencere = 0; kapiZamanAsimi = 0; kullaniciKapatti = 0
+        kapiOzellikHam = null; kapiOzellikOkuma = "başlamadı"; kapiOzellikDegisim = 0L; canIgnoreDoorinfo = "okunmadı"
         synchronized(kapiOlaylari) { kapiOlaylari.clear() }
         sonHata = null
     }
