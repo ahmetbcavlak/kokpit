@@ -20,13 +20,15 @@ Sürüm: 0.8.0 · 171 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüy
 
 **[▶ Kokpit Ana Ekran'ı indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-anaekran.apk)**
 
-Sürüm: 0.2.1 · 1045 KB · Keşif'in yanına ayrı bir uygulama olarak kurulur ("Kokpit"); Keşif silinmez. Araçta Keşif denemelerinden **sonra** dene (K-73).
+Sürüm: 0.2.2 · 1055 KB · Keşif'in yanına ayrı bir uygulama olarak kurulur ("Kokpit"); Keşif silinmez. Araçta Keşif denemelerinden **sonra** dene (K-73).
 
 1. Ekranın tarayıcısında bu sayfayı açıp yukarıdaki bağlantıya dokun. İnince "Yükle"ye dokun.
 2. Kokpit'i aç. Konum izni sorulursa **İzin ver** (hız GPS'ten gelir).
 3. Bir kez: Ayarlar > Erişilebilirlik > **Kokpit kapı uyarısı** > Aç. Yalnız üreticinin kapı/bagaj penceresindeki yazıyı okur; hiçbir şeye dokunmaz, hiçbir şey göndermez.
 
 Sonraki sürümler bunun **üzerine** kurulur (kaldırma): kaldırıp kurmak kapı uyarısı servisini kapatır.
+
+0.2.2: kapı ve bagaj durumu doğrudan aracın sistem değerlerinden okunur (okunamazsa eski yol); üreticinin kapı penceresinde X'e basmak artık "Kapı kapandı." göstermez; teşhis panelinde beş kapı değeri ve can_ignore_doorinfo görünür. CarPlay düğmesi: ZLINK simgeden büyüyerek açılır, Kokpit arkada 0,94'e küçülüp kararır; dönüşte 360 ms'de aydınlanır, açılış klibi tekrar oynamaz. 0.2.1'in üzerine kurulur.
 
 0.2.1: ekrandaki araç gerçek jantla (16" iki renkli, beş cepli); gündüz sürüşte de araç gidiyor görünür (gündüz katmanları; lamba yansıması ve şehir ışıkları yalnız gece). 0.2.0'ın üzerine kurulur.
 
