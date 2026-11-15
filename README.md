@@ -6,7 +6,7 @@ Renault Mégane IV'teki dikey araç ekranı için kendi arayüzümüz.
 
 **[▶ Kokpit Keşif'i indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-kesif.apk)**
 
-Sürüm: 0.7.1 · 145 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
+Sürüm: 0.8.0 · 171 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
 
 0.4.0'dan beri yeni bir imza anahtarı kullanılıyor; 0.2.0'ın üzerine kurulmaz. Ekranda 0.2.0 varsa bir kez:
 
@@ -49,9 +49,19 @@ Ekranın yeni ana arayüzü, ilk sürüm. **Araca hiçbir komut göndermez**; kl
 
 ## Kokpit Keşif nedir?
 
-Ekranı ve araçtan gelen veriyi tanımak için küçük bir uygulama. **Yalnızca okur, hiçbir ayarı değiştirmez, araca hiçbir şey göndermez.**
+Ekranı ve araçtan gelen veriyi tanımak için küçük bir uygulama. **Yalnızca okur, hiçbir ayarı değiştirmez.** Araca giden tek komut "Klima komutu" sayfasındaki dört tuştur (K-117); 0.7'deki kapı penceresi kapatma testi de yalnız düğmeyle çalışır.
 
-### 0.7.1 · Klima +0,5° denemesi (K-69)
+### 0.8.0 · Kapı özellikleri, medya ve bağlantı, klima komutu
+
+Canlı ekranın en üstünde üç yeni sayfa:
+
+- **Kapı özellikleri:** `persist.vendor.cem.cardoor1–5` ile `can_ignore_doorinfo` ve `close_avm_door_flag` 250 ms'de bir okunur. Bu iki bayrağın nerede tutulduğu bilinmediği için sistem özelliklerinde (yaygın önekler ve tam tarama) ve Settings.System/Global/Secure'da aranır; bulunduğu yer değerin yanında yazılır. Sayfa açılınca kayıt başlar, sayfadan çıkınca da sürer; "Ayar Açık turu", "Ayar Kapalı turu" ve serbest işaret düğmeleri. `kapi-ozellikleri.csv` (iPad: `/kapi.csv`).
+- **Medya ve bağlantı:** bildirim erişimi izniyle (Ayarlar'dan bir kez) etkin medya oturumları: paket, başlık, sanatçı, albüm, kapak var mı ve boyutu, çalma durumu ve desteklenen eylemler. Medya bildirimleri (ZLINK, com.hcn.* ve medya oturumu olanlar; arama, mesaj ve e-posta bildirimleri tutulmaz). Bluetooth yayınları (ACL bağlandı/koptu, A2DP alıcı, AVRCP kumanda, A2DP, HFP istemci), üretici yayınları (üretici uygulamalarının kodundaki eylem adları, en çok 150), Google Play hizmetleri ve Play Store sürümleri, ZLINK paketi, ağ ve internet durumu. "30 sn ölçümü" başta, her 5 sn'de ve sonda durumun fotoğrafını, arada her değişikliği yazar. `medya.csv` (iPad: `/medya.csv`). Çalma kontrolü göndermez, bildirimlere dokunmaz.
+- **Klima komutu (K-117):** `com.hcn.autocan.CanService` servisine bağlanır; servis `com.hcn.autocan.aidl.IAirCtrlServices` arayüzünü bildirmezse hiçbir şey gitmez. Üreticinin APK'sı okunabiliyorsa `TRANSACTION_airCtrl = 1` ve `airCtrl(int, int)` olduğu da denetlenir. Yalnız dört tuş: fan + (2), fan − (3), sol sıcaklık + (4), sol sıcaklık − (5). Her dokunuşta onay sorulur, sonra `airCtrl(tuş, 0)`, 100 ms, `airCtrl(tuş, 1)`; bırakma her durumda gönderilir, olmazsa bir kez daha. GPS hızı 1 km/sa'i aşarsa, GPS 3 sn'den eskiyse ya da yoksa düğmeler pasif (kapalı otoparkta GPS olmayabilir). Gönderilenler, sonuçlar ve öncesi/sonrası klima değerleri `klima-tuslari.csv`'ye (iPad: `/klima-tuslari.csv`).
+- 0.7.1'in "Klima +0,5° dene" düğmesi kaldırıldı (eski sonuçlar `/klima-komutu.csv`'de).
+- Yeni izinler: konum (yalnız Klima komutu sayfası açıkken GPS dinlenir) ve Bluetooth (Android 8.1'de bağlantı yayınları için).
+
+### 0.7.1 · Klima +0,5° denemesi (K-69, 0.8.0'da kaldırıldı)
 
 Araca giden ilk ve tek komut. Arayüz listesinde, adı yalnız "sıcaklık artır" diyen tek bir parametresiz metot (ör. `tempUp`, `setLeftTempUp`) bulunursa "Klima +0,5° dene" düğmesi açılır; başka bölge ya da komut sözcüğü (fan, mod, arka, koltuk…) olan adlar düğmeyi kapalı tutar. Düğme metodu ve kodunu gösterir, onaylarsan servise bağlanır, servisin bildirdiği arayüz adı metodun arayüzüyle aynıysa tek bir AIDL çağrısı yapar (parametresiz, üretici kodu uygulamada çalışmaz), sonra 3 sn ACTION_AIR_INFO'da yeni sıcaklığı bekler. Sonuç `klima-komutu.csv`'ye (iPad: `/klima-komutu.csv`) ve kayda.
 
