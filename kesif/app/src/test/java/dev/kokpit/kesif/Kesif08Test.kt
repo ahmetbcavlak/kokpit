@@ -94,8 +94,11 @@ class Kesif08Test {
         val r = run(fake, AirKeys.keys.first { it.code == 4 })
         assertEquals(listOf(4 to 0, 4 to 1), fake.calls.toList())
         assertTrue(r.contains("gönderildi ·"))
-        val csv = AirKeys.log.file(app).readText()
-        assertTrue(csv.contains("Sol sıcaklık +"))
+        // The row is written by the log's writer thread; wait for it.
+        val f = AirKeys.log.file(app)
+        val until = System.currentTimeMillis() + 5000
+        while (!(f.exists() && f.readText().contains("Sol sıcaklık +")) && System.currentTimeMillis() < until) Thread.sleep(20)
+        assertTrue(f.readText().contains("Sol sıcaklık +"))
     }
 
     @Test
