@@ -105,6 +105,22 @@ object LiveProbe {
         }.getOrNull()
     }
 
+    /** One system property, read-only; "" when it does not exist or cannot be read. */
+    fun prop(key: String): String = readProp(key)
+
+    /** Whether properties can be read directly (else only the 2-second getprop scan sees them). */
+    val canReadProps: Boolean get() = getMethod != null
+
+    /** Properties from the last full scans whose name contains [part] (any case). */
+    fun scannedContaining(part: String): List<Pair<String, String>> = synchronized(lock) {
+        scanned.entries.filter { it.key.contains(part, ignoreCase = true) }.map { it.key to it.value.value }.sortedBy { it.first }
+    }
+
+    /** The current ACTION_AIR_INFO extras (name without the action prefix → value). */
+    fun airValues(): Map<String, String> = synchronized(lock) {
+        known.entries.filter { it.key.startsWith("$AIR/") }.associate { it.key.removePrefix("$AIR/") to it.value.value }
+    }
+
     private fun readProp(key: String): String {
         getMethod?.let { m ->
             runCatching { return (m.invoke(null, key, "") as String).trim() }
@@ -381,7 +397,17 @@ object LiveProbe {
     }
 
     /** Live sections, plus the CAN service check (it changes when the user runs the bind test). */
-    fun attach(r: Report): Report = r.copy(sections = sections() + listOfNotNull(ServiceProbe.section()) + r.sections)
+    fun attach(r: Report): Report = r.copy(sections = sections() + listOfNotNull(ServiceProbe.section()) + extra08() + r.sections)
+
+    /** Keşif 0.8 pages, in the report too. */
+    private fun extra08(): List<Section> {
+        val ctx = PackageExporter.appContext() ?: return emptyList()
+        return listOf(
+            Section("Kapı özellikleri", DoorProps.sectionLines()),
+            Section("Medya ve bağlantı", runCatching { MediaProbe.sectionLines(ctx) }.getOrDefault(emptyList())),
+            Section("Klima komutu", listOf(Line("Arayüz (APK)", AirKeys.apkCheck ?: "denetlenmedi"), Line("Son sonuç", AirKeys.lastResult ?: "gönderilmedi"))),
+        )
+    }
 
     fun json(): String {
         val now = System.currentTimeMillis()

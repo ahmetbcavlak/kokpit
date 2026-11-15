@@ -37,10 +37,12 @@ class MainActivity : Activity() {
     private lateinit var reportView: ScrollView
     private var live: LiveScreen? = null
     private var showingLive = true
+    /** A Keşif 0.8 page on screen, or null. */
+    private var page: Page? = null
     private val main = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
         override fun run() {
-            if (showingLive) live?.tick()
+            page?.tick() ?: run { if (showingLive) live?.tick() }
             main.postDelayed(this, LiveProbe.FAST_MS)
         }
     }
@@ -64,6 +66,7 @@ class MainActivity : Activity() {
         Recorder.init(this)
         PackageExporter.init(this)
         ServiceProbe.init(this)
+        MediaProbe.start(this)
         DeviceInfo.warmUp()
         startServer()
         showLive()
@@ -72,6 +75,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         LiveProbe.visible = true
+        page?.onShow()
         main.removeCallbacks(ticker)
         main.post(ticker)
     }
@@ -79,6 +83,7 @@ class MainActivity : Activity() {
     override fun onStop() {
         // CarPlay or the camera in front: no screen updates; the full scan pauses unless recording.
         LiveProbe.visible = false
+        page?.onHide()
         main.removeCallbacks(ticker)
         super.onStop()
     }
@@ -91,13 +96,15 @@ class MainActivity : Activity() {
             // Closes the file but keeps the recording on, so the next start continues it.
             Recorder.suspend()
             LiveProbe.stop(this)
+            MediaProbe.stop(this)
+            GpsGuard.stop(this)
         }
         super.onDestroy()
     }
 
     @Deprecated("Activity.onBackPressed")
     override fun onBackPressed() {
-        if (!showingLive) showLive() else @Suppress("DEPRECATION") super.onBackPressed()
+        if (page != null || !showingLive) showLive() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     private var addressAt = 0L
@@ -115,13 +122,36 @@ class MainActivity : Activity() {
     }
 
     private fun showLive() {
+        closePage()
         showingLive = true
-        val screen = live ?: LiveScreen(this, onReport = { showReport() }, address = { address() }).also { live = it }
+        val screen = live ?: LiveScreen(this, onReport = { showReport() }, address = { address() }, onPage = { showPage(it) }).also { live = it }
         setContentView(screen.root)
         screen.tick()
     }
 
+    private fun closePage() {
+        page?.onHide()
+        page = null
+    }
+
+    /** Keşif 0.8 pages; each is built fresh, its data lives in the probe objects. */
+    private fun showPage(id: String) {
+        closePage()
+        val p: Page = when (id) {
+            "kapi" -> DoorPage(this) { showLive() }
+            "medya" -> MediaPage(this) { showLive() }
+            "klima" -> AirPage(this) { showLive() }
+            else -> return
+        }
+        showingLive = false
+        page = p
+        setContentView(p.root)
+        p.onShow()
+        p.tick()
+    }
+
     private fun showReport() {
+        closePage()
         showingLive = false
         setContentView(reportView)
         if (report == null) load() else render(report!!)
@@ -134,7 +164,7 @@ class MainActivity : Activity() {
         thread {
             val r = runCatching { ReportBuilder.build(applicationContext) }.getOrNull()
             report = r
-            main.post { if (showingLive) return@post; if (r != null) render(r) else showError() }
+            main.post { if (showingLive || page != null) return@post; if (r != null) render(r) else showError() }
         }
     }
 

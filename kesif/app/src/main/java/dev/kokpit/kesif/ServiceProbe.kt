@@ -185,6 +185,6 @@ object ServiceProbe {
         "Servis erişilebilirliği · $ACTION",
         staticInfo(ctx) + (lastResult ?: listOf(Line("Bağlanma testi", "henüz denenmedi (canlı ekrandaki düğmeyle yapılır)"))) +
             (interfaceLines ?: listOf(Line("Arayüz listesi", "henüz alınmadı (canlı ekrandaki düğmeyle)"))) +
-            listOfNotNull(AirCommand.lastResult?.let { Line("Klima +0,5° denemesi", it) }),
+            listOfNotNull(AirKeys.lastResult?.let { Line("Klima komutu (son)", it) }, AirKeys.apkCheck?.let { Line("Klima arayüzü (APK)", it) }),
     )
 }

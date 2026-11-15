@@ -435,7 +435,8 @@ object PackageExporter {
         ZipOutputStream(out).use { zip ->
             // The window event log lives one folder up; it belongs in the diagnostic bundle too.
             listOfNotNull(app?.let { WindowLog.file(it) }, app?.let { UiDump.file(it) }, app?.let { ServiceProbe.interfaceFile(it) },
-                app?.let { AirCommand.file(it) })
+                app?.let { File(it.filesDir, "kayit/klima-komutu.csv") }, app?.let { AirKeys.log.file(it) },
+                app?.let { DoorProps.log.file(it) }, app?.let { MediaProbe.log.file(it) })
                 .filter { it.exists() }.forEach { f ->
                 runCatching { FileInputStream(f).use { input ->
                     zip.putNextEntry(ZipEntry(f.name).apply { time = f.lastModified() }); input.copyTo(zip, 64 * 1024); zip.closeEntry()
