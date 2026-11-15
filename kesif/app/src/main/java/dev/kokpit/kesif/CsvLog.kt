@@ -26,6 +26,18 @@ class CsvLog(private val name: String, private val header: String) {
 
     fun append(ctx: Context, at: Long, cells: List<String>) = appendAll(ctx, listOf(at to cells))
 
+    /** One writer thread per file: rows stay in order and a burst of events never piles up threads. */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "kesif-csv-$name").apply { isDaemon = true } }
+
+    /** Queues the rows for the writer thread; never blocks the caller. */
+    fun post(ctx: Context, rows: List<Pair<Long, List<String>>>) {
+        if (rows.isEmpty()) return
+        val app = ctx.applicationContext
+        runCatching { writer.execute { appendAll(app, rows) } }
+    }
+
+    fun post(ctx: Context, at: Long, cells: List<String>) = post(ctx, listOf(at to cells))
+
     /** Several rows in one write and one sync. */
     fun appendAll(ctx: Context, rows: List<Pair<Long, List<String>>>) {
         if (rows.isEmpty()) return

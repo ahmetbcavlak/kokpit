@@ -49,6 +49,8 @@ object DoorProps {
     @Volatile private var startedAt = 0L
     @Volatile private var generation = 0
     @Volatile var lastMark: String? = null; private set
+    /** The user stopped the recording on the page: reopening the page does not restart it. */
+    @Volatile var stoppedByUser = false
     @Volatile var reads = 0; private set
 
     /** Where a flag was found: "Settings.System=1 · persist.vendor.cem.x=0", or "" when nowhere. */
@@ -101,13 +103,13 @@ object DoorProps {
         thread(name = "kesif-kapi", isDaemon = true) {
             poll(app) // first values
             val now = System.currentTimeMillis()
-            log.appendAll(app, listOf(now to listOf("0.00", "oturum", "", "", "", "", "kayıt başladı · Keşif ${BuildConfigCompat.version}")) +
+            log.post(app, listOf(now to listOf("0.00", "oturum", "", "", "", "", "kayıt başladı · Keşif ${BuildConfigCompat.version}")) +
                 rows.map { now to listOf("0.00", "ilk", it.id, it.label, "", it.value.ifEmpty { "(yok)" }, "") })
             while (recording && gen == generation) {
                 val t0 = android.os.SystemClock.elapsedRealtime()
-                val changes = poll(app)
+                val changes = runCatching { poll(app) }.getOrDefault(emptyList())
                 if (changes.isNotEmpty()) {
-                    log.appendAll(app, changes.map { c -> c.at to listOf(sec(c.at), "deger", c.id, c.label, c.old.ifEmpty { "(yok)" }, c.new.ifEmpty { "(yok)" }, "") })
+                    log.post(app, changes.map { c -> c.at to listOf(sec(c.at), "deger", c.id, c.label, c.old.ifEmpty { "(yok)" }, c.new.ifEmpty { "(yok)" }, "") })
                     changes.forEach { Recorder.event(it.at, "kapi-ozellik", it.id, it.old, it.new) }
                 }
                 val spent = android.os.SystemClock.elapsedRealtime() - t0
@@ -121,15 +123,14 @@ object DoorProps {
         recording = false
         generation++
         val now = System.currentTimeMillis()
-        log.append(ctx.applicationContext, now, listOf(sec(now), "oturum", "", "", "", "", "kayıt durdu"))
+        log.post(ctx, now, listOf(sec(now), "oturum", "", "", "", "", "kayıt durdu"))
     }
 
     fun mark(ctx: Context, note: String) {
         if (!recording) startRecording(ctx)
         lastMark = note
         val now = System.currentTimeMillis()
-        // Off the main thread: the write is synced to storage.
-        thread(isDaemon = true) { log.append(ctx.applicationContext, now, listOf(sec(now), "isaret", "", "", "", "", note)) }
+        log.post(ctx, now, listOf(sec(now), "isaret", "", "", "", "", note))
         Recorder.event(now, "isaret", "", "", note)
     }
 
@@ -174,10 +175,11 @@ class DoorPage(private val a: Activity, onBack: () -> Unit) : Page {
         }
     }
 
-    override fun onShow() { DoorProps.startRecording(a) }
+    override fun onShow() { if (!DoorProps.stoppedByUser) DoorProps.startRecording(a) }
 
     private fun toggle() {
-        if (DoorProps.recording) DoorProps.stopRecording(a) else DoorProps.startRecording(a)
+        if (DoorProps.recording) { DoorProps.stopRecording(a); DoorProps.stoppedByUser = true }
+        else { DoorProps.stoppedByUser = false; DoorProps.startRecording(a) }
         tick()
     }
 

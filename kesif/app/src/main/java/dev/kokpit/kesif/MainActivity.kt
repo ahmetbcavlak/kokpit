@@ -98,6 +98,7 @@ class MainActivity : Activity() {
             LiveProbe.stop(this)
             MediaProbe.stop(this)
             GpsGuard.stop(this)
+            DoorProps.stopRecording(this) // the 250 ms poll ends with the app
         }
         super.onDestroy()
     }

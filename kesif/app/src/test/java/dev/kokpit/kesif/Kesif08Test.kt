@@ -30,7 +30,7 @@ class Kesif08Test {
     @Before
     fun clear() {
         GpsGuard.feed(null)
-        AirKeys.setApkCheck(null, false)
+        AirKeys.setApkCheck("test: APK doğrulandı", false)
     }
 
     // ---------- GPS guard ----------
@@ -48,6 +48,8 @@ class Kesif08Test {
         GpsGuard.feed(fix(1.5f)); assertTrue(GpsGuard.blockReason()!!.startsWith("araç hareket ediyor"))
         GpsGuard.feed(fix(0f, ageMs = 5000)); assertTrue(GpsGuard.blockReason()!!.startsWith("GPS eski"))
         GpsGuard.feed(fix(null)); assertEquals("GPS hız vermiyor", GpsGuard.blockReason())
+        GpsGuard.feed(fix(Float.NaN)); assertTrue(GpsGuard.blockReason()!!.startsWith("araç hareket ediyor"))
+        GpsGuard.feed(fix(0f, ageMs = -5000)); assertEquals("GPS zamanı geçersiz", GpsGuard.blockReason())
     }
 
     // ---------- climate keys ----------
@@ -91,7 +93,7 @@ class Kesif08Test {
         val fake = FakeAir(AirKeys.DESCRIPTOR)
         val r = run(fake, AirKeys.keys.first { it.code == 4 })
         assertEquals(listOf(4 to 0, 4 to 1), fake.calls.toList())
-        assertTrue(r.contains("gönderildi"))
+        assertTrue(r.contains("gönderildi ·"))
         val csv = AirKeys.log.file(app).readText()
         assertTrue(csv.contains("Sol sıcaklık +"))
     }
@@ -137,6 +139,14 @@ class Kesif08Test {
         assertEquals(listOf(2, 3, 4, 5), AirKeys.keys.map { it.code })
         assertFalse(AirKeys.send(app, AirKeys.Key(16, "A/C", "x")) { })
         assertFalse(AirKeys.send(app, AirKeys.Key(1, "aç/kapa", "x")) { })
+    }
+
+    @Test
+    fun nothingBeforeTheApkCheck() {
+        GpsGuard.feed(fix(0f))
+        AirKeys.setApkCheck(null, false)
+        assertEquals("APK denetleniyor…", AirKeys.blockReason())
+        assertFalse(AirKeys.send(app, AirKeys.keys[0]) { })
     }
 
     @Test
@@ -203,6 +213,10 @@ class Kesif08Test {
         assertFalse(got.contains("hello world")) // has a space
         val acts = got.filter { DexStrings.looksLikeAction(it) }
         assertEquals(setOf("com.hcn.bt.ACTION_MUSIC_INFO", "ACTION_BT_CONNECT", "com.hcn.media.id3"), acts.toSet())
+        // A dex inside a bigger file (as in a .vdex): offsets are relative to its own start.
+        val inner = dex(list)
+        val outer = ByteArray(1000) + inner + ByteArray(50)
+        assertEquals(got, DexStrings.strings(outer, 1000, inner.size))
         // Garbage never crashes.
         assertTrue(DexStrings.strings(ByteArray(200) { 0x7F }, 0).isEmpty())
         assertTrue(DexStrings.strings(ByteArray(10), 0).isEmpty())

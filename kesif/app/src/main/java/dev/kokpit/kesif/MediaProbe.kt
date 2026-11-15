@@ -37,12 +37,12 @@ import kotlin.concurrent.thread
 class KesifBildirim : NotificationListenerService() {
     override fun onListenerConnected() {
         MediaProbe.listenerConnected = true
-        val current = runCatching { activeNotifications?.toList().orEmpty() }.getOrDefault(emptyList())
-        MediaProbe.setCurrentNotifications(current)
+        runCatching { MediaProbe.setCurrentNotifications(activeNotifications?.toList().orEmpty()) }
     }
     override fun onListenerDisconnected() { MediaProbe.listenerConnected = false }
-    override fun onNotificationPosted(sbn: StatusBarNotification?) { sbn?.let { MediaProbe.onNotification(it, posted = true) } }
-    override fun onNotificationRemoved(sbn: StatusBarNotification?) { sbn?.let { MediaProbe.onNotification(it, posted = false) } }
+    // A notification we cannot read must never crash the app.
+    override fun onNotificationPosted(sbn: StatusBarNotification?) { runCatching { sbn?.let { MediaProbe.onNotification(it, posted = true) } } }
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) { runCatching { sbn?.let { MediaProbe.onNotification(it, posted = false) } } }
 }
 
 /**
@@ -152,7 +152,7 @@ object MediaProbe {
                         .onFailure { vendorScan += " · dinleyici kurulamadı: ${it.message}" }
                 }
                 val now = System.currentTimeMillis()
-                thread(isDaemon = true) { log.appendAll(a, acts.map { now to listOf("", measureId, "uretici-eylem", "dex", it, "dinleniyor") }) }
+                log.post(a, acts.map { now to listOf("", measureId, "uretici-eylem", "dex", it, "dinleniyor") })
                 done()
             }
         }
@@ -160,12 +160,16 @@ object MediaProbe {
 
     // ---------- packages and network ----------
 
-    fun zlinkPackages(ctx: Context): List<String> = runCatching {
+    @Volatile private var zlinkCache: List<String>? = null
+
+    /** By package name; only if none matches, by label (slow: every app's label), once per run. */
+    fun zlinkPackages(ctx: Context): List<String> = zlinkCache ?: runCatching {
         val pm = ctx.packageManager
-        pm.getInstalledApplications(0).filter { ai ->
-            ai.packageName.contains("zlink", true) || runCatching { pm.getApplicationLabel(ai).toString() }.getOrDefault("").contains("zlink", true)
-        }.map { it.packageName }.sorted()
-    }.getOrDefault(emptyList())
+        val apps = pm.getInstalledApplications(0)
+        apps.filter { it.packageName.contains("zlink", true) }.map { it.packageName }.ifEmpty {
+            apps.filter { ai -> runCatching { pm.getApplicationLabel(ai).toString() }.getOrDefault("").contains("zlink", true) }.map { it.packageName }
+        }.sorted()
+    }.getOrDefault(emptyList()).also { zlinkCache = it }
 
     fun vendorPackages(ctx: Context): List<String> = runCatching {
         ctx.packageManager.getInstalledApplications(0).map { it.packageName }.filter { it.startsWith("com.hcn.") }.sorted()
@@ -299,6 +303,8 @@ object MediaProbe {
     private fun interesting(ctx: Context?, sbn: StatusBarNotification): Boolean {
         val n = sbn.notification ?: return false
         val p = sbn.packageName.orEmpty()
+        // Calls and messages are never kept, even from the vendor's own Bluetooth phone app.
+        if (n.category in setOf(Notification.CATEGORY_CALL, Notification.CATEGORY_MESSAGE, Notification.CATEGORY_EMAIL)) return false
         return p.startsWith("com.hcn.") || p.contains("zlink", true) ||
             n.extras?.containsKey(Notification.EXTRA_MEDIA_SESSION) == true ||
             n.category == Notification.CATEGORY_TRANSPORT ||
@@ -372,7 +378,7 @@ object MediaProbe {
         val a = app ?: return
         val id = measureId
         val sc = sec(now)
-        if (write) thread(isDaemon = true) { log.append(a, now, listOf(sc, id, kind, source, "", value)) }
+        if (write) log.post(a, now, listOf(sc, id, kind, source, "", value))
     }
 
     fun recentEvents(): List<String> = synchronized(lock) { recent.toList().reversed() }
@@ -394,7 +400,7 @@ object MediaProbe {
         else if (s.isEmpty()) row("$tag-oturum", "medya", "oturumlar", "etkin medya oturumu yok")
         else s.forEach { row("$tag-oturum", it.pkg, it.meta, it.state) }
         currentNotifications().forEach { (k, v) -> row("$tag-bildirim", k.substringBefore('#'), k, v) }
-        log.appendAll(a, rows)
+        log.post(a, rows)
     }
 
     /** Starts the 30-second measurement; false when one is already running. */
@@ -408,13 +414,12 @@ object MediaProbe {
         lastMeasure = "Ölçüm sürüyor…"
         val id = measureId
         val start = measureStart
-        thread(isDaemon = true) {
-            log.append(a, start, listOf("0.00", id, "olcum", "", "", "başladı · Keşif ${BuildConfigCompat.version}"))
-            snapshot(a, "ilk", id, start)
-            main.post { if (measuring) attachCallbacks(a) }
-        }
+        // Changes are watched from the first moment; the (slower) first snapshot follows.
+        attachCallbacks(a)
+        log.post(a, start, listOf("0.00", id, "olcum", "", "", "başladı · Keşif ${BuildConfigCompat.version}"))
+        thread(isDaemon = true) { runCatching { snapshot(a, "ilk", id, start) } }
         for (t in SNAPSHOT_MS until MEASURE_MS step SNAPSHOT_MS) main.postDelayed({
-            if (measuring && measureId == id) thread(isDaemon = true) { sessionsSnapshot(a, "ara", id, start) }
+            if (measuring && measureId == id) thread(isDaemon = true) { runCatching { sessionsSnapshot(a, "ara", id, start) } }
         }, t)
         main.postDelayed({ if (measureId == id) stopMeasure(a, "30 sn doldu"); done() }, MEASURE_MS)
         return true
@@ -424,7 +429,7 @@ object MediaProbe {
         val now = System.currentTimeMillis()
         val s = sessions(a) ?: return
         val sc = "%.2f".format(Locale.US, (now - start) / 1000.0)
-        log.appendAll(a, s.map { now to listOf(sc, id, "$tag-oturum", it.pkg, it.meta, it.state) })
+        log.post(a, s.map { now to listOf(sc, id, "$tag-oturum", it.pkg, it.meta, it.state) })
     }
 
     private fun attachCallbacks(a: Context) {
@@ -467,14 +472,39 @@ object MediaProbe {
         measureId = ""
         lastMeasure = "Son ölçüm $id: $why · medya.csv"
         thread(isDaemon = true) {
-            snapshot(a, "son", id, start)
-            log.append(a, now, listOf("%.2f".format(Locale.US, (now - start) / 1000.0), id, "olcum", "", "", "bitti · $why"))
+            runCatching { snapshot(a, "son", id, start) }
+            log.post(a, now, listOf("%.2f".format(Locale.US, (now - start) / 1000.0), id, "olcum", "", "", "bitti · $why"))
+        }
+    }
+
+    /** The last slow read (sessions, packages, network, Bluetooth), made on a worker for the page and the report. */
+    @Volatile var slowLines: List<Line> = emptyList(); private set
+    @Volatile var sessionText: String = "okunuyor…"; private set
+    @Volatile private var slowRunning = false
+
+    fun refreshSlow(ctx: Context) {
+        if (slowRunning) return
+        slowRunning = true
+        val a = ctx.applicationContext
+        thread(name = "kesif-medya", isDaemon = true) {
+            try {
+                val s = sessions(a)
+                sessionText = when {
+                    s == null -> "Okunamadı: bildirim erişimi kapalı."
+                    s.isEmpty() -> "Etkin medya oturumu yok."
+                    else -> s.joinToString("\n\n") { "${it.pkg}\n  ${it.meta}\n  ${it.state}" }
+                }
+                slowLines = packageLines(a) + networkLines(a) + bluetoothLines()
+            } catch (t: Throwable) {
+                sessionText = "Okunamadı: ${t.javaClass.simpleName}"
+            } finally { slowRunning = false }
         }
     }
 
     fun sectionLines(ctx: Context): List<Line> =
         listOf(Line("Bildirim erişimi", if (listenerEnabled(ctx)) "açık" else "kapalı"), Line("Üretici yayınları", vendorScan)) +
-            packageLines(ctx) + networkLines(ctx) + bluetoothLines()
+            slowLines.ifEmpty { listOf(Line("Paketler, ağ, Bluetooth", "Medya sayfası açılınca okunur")) } +
+            listOf(Line("Medya oturumları", sessionText))
 }
 
 class MediaPage(private val a: android.app.Activity, onBack: () -> Unit) : Page {
@@ -495,7 +525,8 @@ class MediaPage(private val a: android.app.Activity, onBack: () -> Unit) : Page 
         ui.card(content) {
             addView(ui.label("Bildirim erişimi", 17f, Palette.accent, bold = true))
             addView(ui.label("Medya oturumlarını görmek için gerekli. Keşif bildirimlere dokunmaz, yanıtlamaz, silmez; yalnız medya bildirimlerini ve ZLINK ile üretici uygulamalarınınkini okur.", 13f, Palette.faint).apply { setPadding(0, ui.dp(4), 0, ui.dp(6)) })
-            addView(access.apply { setPadding(0, 0, 0, ui.dp(8)) })
+            addView(access.apply { setPadding(0, 0, 0, ui.dp(4)) })
+            addView(ui.label("Düğme ayarı açmazsa: Ayarlar › Uygulamalar ve bildirimler › Özel uygulama erişimi › Bildirim erişimi › Kokpit Keşif.", 13f, Palette.faint).apply { setPadding(0, 0, 0, ui.dp(8)) })
             addView(ui.button("Bildirim erişimi ayarını aç", primary = false) {
                 runCatching { a.startActivity(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }
                     .onFailure { android.widget.Toast.makeText(a, "Ayar açılamadı", android.widget.Toast.LENGTH_SHORT).show() }
@@ -529,20 +560,15 @@ class MediaPage(private val a: android.app.Activity, onBack: () -> Unit) : Page 
         access.text = if (enabled) "Açık" + (if (MediaProbe.listenerConnected) " · bağlı" else " · bağlanması bekleniyor") else "Kapalı: aşağıdaki düğmeyle “Kokpit Keşif”i aç."
         measureButton.isEnabled = !MediaProbe.measuring
         measureButton.alpha = if (MediaProbe.measuring) 0.5f else 1f
-        measureStatus.text = MediaProbe.lastMeasure ?: "Henüz ölçüm yok." + (MediaProbe.log.lastError?.let { " · yazma hatası: $it" } ?: "")
+        measureStatus.text = (MediaProbe.lastMeasure ?: "Henüz ölçüm yok.") + (MediaProbe.log.lastError?.let { " · yazma hatası: $it" } ?: "")
         events.text = MediaProbe.recentEvents().joinToString("\n").ifEmpty { "Henüz olay yok." }
         notes.text = MediaProbe.currentNotifications().joinToString("\n\n") { (k, v) -> "$k\n  $v" }
             .ifEmpty { if (enabled) "Medya bildirimi yok." else "Bildirim erişimi kapalı." }
-        // Sessions, packages and network: once a second is plenty and keeps the screen light.
-        if (now - lastSlow < 1000) return
-        lastSlow = now
-        val s = MediaProbe.sessions(a)
-        sessions.text = when {
-            s == null -> "Okunamadı: bildirim erişimi kapalı."
-            s.isEmpty() -> "Etkin medya oturumu yok."
-            else -> s.joinToString("\n\n") { "${it.pkg}\n  ${it.meta}\n  ${it.state}" }
-        }
-        system.text = (MediaProbe.packageLines(a) + MediaProbe.networkLines(a) + MediaProbe.bluetoothLines() +
+        // Sessions, packages, network and Bluetooth are binder calls: read once a second on a worker,
+        // the screen shows the last result.
+        if (now - lastSlow >= 1000) { lastSlow = now; MediaProbe.refreshSlow(a) }
+        sessions.text = MediaProbe.sessionText
+        system.text = (MediaProbe.slowLines +
             Line("Üretici yayınları", MediaProbe.vendorScan) +
             MediaProbe.eventCounts().takeLast(12).map { Line("Sayaç", "${it.first}: ${it.second}") })
             .joinToString("\n") { "${it.label}: ${it.value}" }

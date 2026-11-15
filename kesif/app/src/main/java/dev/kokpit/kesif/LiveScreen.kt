@@ -365,7 +365,7 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
             recPill.text = "kayıt kapalı"
             recPill.setTextColor(Palette.faint)
             recButton.text = "Kaydı başlat"
-            recInfo.text = "Yalnız okur; tek istisna Klima komutu sayfası"
+            recInfo.text = "Yalnız okur; araca komut yalnız Klima komutu sayfasından gider"
         }
 
         val url = address()

@@ -72,8 +72,9 @@ object GpsGuard {
         val age = (nowElapsedNanos - f.elapsedRealtimeNanos) / 1_000_000
         if (age > MAX_AGE_MS) return "GPS eski (${age / 1000} sn)"
         if (!f.hasSpeed()) return "GPS hız vermiyor"
+        if (age < 0) return "GPS zamanı geçersiz"
         val kmh = f.speed * 3.6
-        if (kmh > MAX_KMH) return "araç hareket ediyor (%.1f km/sa)".format(Locale("tr"), kmh)
+        if (!(kmh <= MAX_KMH)) return "araç hareket ediyor (%.1f km/sa)".format(Locale("tr"), kmh)
         return null
     }
 
@@ -163,10 +164,15 @@ object AirKeys {
 
     /** null when a key may be offered; otherwise why not. */
     fun blockReason(): String? = when {
-        busy.get() -> "önceki komut sürüyor"
+        busy.get() -> if (hung) "servis yanıt vermiyor; uygulamayı kapatıp aç" else "önceki komut sürüyor"
+        apkCheck == null -> "APK denetleniyor…"
         apkMismatch -> apkCheck
         else -> GpsGuard.blockReason()
     }
+
+    /** Set when the service has not answered for [HANG_MS]; only the text changes, nothing is sent. */
+    @Volatile var hung = false; private set
+    private const val HANG_MS = 5000L
 
     fun confirmText(k: Key): String {
         val air = LiveProbe.airValues()
@@ -189,8 +195,9 @@ object AirKeys {
     fun send(ctx: Context, k: Key, done: () -> Unit): Boolean {
         if (k.code !in allowed) { lastResult = "izinli olmayan tuş ${k.code}"; return false }
         GpsGuard.blockReason()?.let { lastResult = "gönderilmedi: $it"; return false }
-        if (apkMismatch) { lastResult = "gönderilmedi: $apkCheck"; return false }
+        if (apkCheck == null || apkMismatch) { lastResult = "gönderilmedi: ${apkCheck ?: "APK denetleniyor"}"; return false }
         if (!busy.compareAndSet(false, true)) return false
+        hung = false
         val app = ctx.applicationContext
         val main = Handler(Looper.getMainLooper())
         val state = AtomicInteger(CONNECTING)
@@ -199,7 +206,8 @@ object AirKeys {
         val bound = AtomicBoolean(false)
         val speed = GpsGuard.speedText()
         lateinit var conn: ServiceConnection
-        if (!Recorder.recording) runCatching { Recorder.mark("klima tuş ${k.code}") }
+        // A marker in the main recording when one is running; a tap never starts a recording.
+        if (Recorder.recording) runCatching { Recorder.mark("klima tuş ${k.code}") }
 
         fun finish(result: String, iface: String, press: String, release: String, before: String, after: String, ms: String) {
             if (!finished.compareAndSet(false, true)) return
@@ -207,9 +215,8 @@ object AirKeys {
             if (bound.get()) runCatching { app.unbindService(conn) }
             val at = System.currentTimeMillis()
             lastResult = "${k.name}: $result"
-            thread(isDaemon = true) {
-                log.append(app, at, listOf(k.code.toString(), k.name, speed, iface, press, release, before, after, ms, result))
-            }
+            hung = false
+            log.post(app, at, listOf(k.code.toString(), k.name, speed, iface, press, release, before, after, ms, result))
             Recorder.event(at, "komut", "airCtrl ${k.code} ${k.name}", before, "$after · $result")
             busy.set(false)
             done()
@@ -223,7 +230,10 @@ object AirKeys {
                 main.removeCallbacks(timeout)
                 if (state.get() != CONNECTING) return
                 if (service == null) { main.post { if (state.compareAndSet(CONNECTING, DONE)) finish("servis boş bağlantı döndü; komut gönderilmedi", "", "", "", "", "", "") }; return }
-                thread(name = "kesif-klima-tus") { work(service, k, state, main, ::finish) }
+                // A binder call that never returns: the status says so; nothing else is sent (a release on
+                // another thread could reach the service before the press).
+                main.postDelayed({ if (!finished.get()) { hung = true; lastResult = "${k.name}: servis yanıt vermiyor (bekleniyor)" } }, HANG_MS)
+                thread(name = "kesif-klima-tus") { work(app, service, k, state, main, ::finish) }
             }
             override fun onServiceDisconnected(name: ComponentName?) {}
         }
@@ -239,7 +249,7 @@ object AirKeys {
         return true
     }
 
-    private fun work(service: IBinder, k: Key, state: AtomicInteger, main: Handler,
+    private fun work(app: Context, service: IBinder, k: Key, state: AtomicInteger, main: Handler,
                      finish: (String, String, String, String, String, String, String) -> Unit) {
         var iface = ""
         var press = ""
@@ -252,11 +262,15 @@ object AirKeys {
         try {
             iface = runCatching { service.interfaceDescriptor }.getOrNull() ?: "?"
             if (iface != DESCRIPTOR) { state.set(DONE); end("servis $iface arayüzünü bildiriyor, $DESCRIPTOR değil; komut gönderilmedi"); return }
-            // The guard again, at the last moment: the car may have started moving while the dialog was open.
+            // The APK verdict (cached) and the guard again, at the last moment: the car may have started
+            // moving while the dialog was open.
+            checkApk(app)
+            if (apkMismatch) { state.set(DONE); end("gönderilmedi: $apkCheck"); return }
             GpsGuard.blockReason()?.let { state.set(DONE); end("gönderilmedi: $it"); return }
             before = air(k)
             // The single point where a command can leave: only from CONNECTING, only once.
             if (!state.compareAndSet(CONNECTING, SENDING)) return
+            val held = SystemClock.uptimeMillis()
             try {
                 press = call(service, k.code, PRESS)
                 Thread.sleep(HOLD_MS)
@@ -266,6 +280,7 @@ object AirKeys {
                     Thread.sleep(50)
                     release += " · ikinci deneme: " + call(service, k.code, RELEASE)
                 }
+                press += " · ${SystemClock.uptimeMillis() - held} ms basılı"
             }
             // Wait for ACTION_AIR_INFO to show the change, from the release on.
             val t0 = SystemClock.uptimeMillis()
@@ -277,7 +292,7 @@ object AirKeys {
                 Thread.sleep(50)
             }
             val result = when {
-                press != "tamam" || !release.startsWith("tamam") && !release.endsWith("tamam") -> "gönderildi, servis hata verdi (bas: $press, bırak: $release)"
+                !press.startsWith("tamam ") || !release.startsWith("tamam") && !release.endsWith("tamam") -> "gönderildi, servis hata verdi (bas: $press, bırak: $release)"
                 ms == null -> "gönderildi · $WAIT_VERIFY_MS ms içinde klima yayınında değişiklik görülmedi"
                 else -> "gönderildi · $before → $after, $ms ms içinde klima yayınıyla görüldü"
             }
@@ -316,6 +331,7 @@ class AirPage(private val a: Activity, onBack: () -> Unit) : Page {
     private val values = ui.label("", 15f, Palette.text, mono = true)
     private val apk = ui.label("", 13f, Palette.muted)
     private val result = ui.label("Henüz gönderilmedi.", 14f, Palette.text, mono = true)
+    private var asked = false
     private val buttons = AirKeys.keys.map { k -> k to ui.button(k.name, primary = false, size = 20f) { confirm(k) } }
     private var dialogOpen = false
 
@@ -343,7 +359,7 @@ class AirPage(private val a: Activity, onBack: () -> Unit) : Page {
     }
 
     override fun onShow() {
-        if (!GpsGuard.hasPermission(a)) runCatching { a.requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 17) }
+        if (!GpsGuard.hasPermission(a) && !asked) { asked = true; runCatching { a.requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 17) } }
         GpsGuard.start(a)
         if (AirKeys.apkCheck == null) thread(isDaemon = true) { AirKeys.checkApk(a) }
     }

@@ -14,7 +14,7 @@ import java.util.zip.ZipFile
  */
 object DexStrings {
 
-    private const val MAX_DEX = 32L * 1024 * 1024
+    private const val MAX_DEX = 16L * 1024 * 1024
 
     private val dotted = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+){1,8}$")
     private val upper = Regex("^[A-Z][A-Z0-9_]{5,80}$")
@@ -42,7 +42,9 @@ object DexStrings {
             ZipFile(apk).use { z ->
                 for (e in z.entries().toList()) {
                     if (!e.name.matches(Regex("classes\\d*\\.dex")) || e.size !in 1..MAX_DEX) continue
-                    val dex = z.getInputStream(e).use { it.readBytes() }
+                    // Exactly the entry's size, read once: no growing buffer and copies on a 32-bit heap.
+                    val dex = ByteArray(e.size.toInt())
+                    z.getInputStream(e).use { java.io.DataInputStream(it).readFully(dex) }
                     any = true
                     strings(dex, 0).forEach(sink)
                 }
