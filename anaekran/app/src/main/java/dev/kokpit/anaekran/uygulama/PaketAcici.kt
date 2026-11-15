@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 
 /**
  * Opens other apps (research 7). Never throws: a missing package or a refused start
@@ -18,13 +19,17 @@ object PaketAcici {
 
     enum class Sonuc { ACILDI, YOK, HATA }
 
-    fun ac(ctx: Context, paket: String): Sonuc {
+    /**
+     * Opens [paket]'s launcher activity. [secenek] is an ActivityOptions bundle for the window
+     * transition (the CarPlay door: ActivityOptions.makeScaleUpAnimation); null = the system's.
+     */
+    fun ac(ctx: Context, paket: String, secenek: Bundle? = null): Sonuc {
         val intent = try {
             ctx.packageManager.getLaunchIntentForPackage(paket)
         } catch (e: RuntimeException) {
             null
         } ?: return Sonuc.YOK
-        return baslat(ctx, intent)
+        return baslat(ctx, intent, secenek)
     }
 
     /** A launcher activity from the app list. */
@@ -42,10 +47,10 @@ object PaketAcici {
         return baslat(ctx, niyet)
     }
 
-    private fun baslat(ctx: Context, intent: Intent): Sonuc {
+    private fun baslat(ctx: Context, intent: Intent, secenek: Bundle? = null): Sonuc {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
-            ctx.startActivity(intent)
+            ctx.startActivity(intent, secenek)
             Sonuc.ACILDI
         } catch (e: ActivityNotFoundException) {
             Sonuc.YOK

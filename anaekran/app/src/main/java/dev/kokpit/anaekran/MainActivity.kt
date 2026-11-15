@@ -1,6 +1,7 @@
 package dev.kokpit.anaekran
 
 import android.app.Activity
+import android.app.ActivityOptions
 import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.os.Bundle
@@ -9,6 +10,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
@@ -16,6 +18,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import dev.kokpit.anaekran.arayuz.AltCubuk
 import dev.kokpit.anaekran.arayuz.AracHaritasi
+import dev.kokpit.anaekran.arayuz.CarPlayKapisi
 import dev.kokpit.anaekran.arayuz.Gorseller
 import dev.kokpit.anaekran.arayuz.IsikCizgisi
 import dev.kokpit.anaekran.arayuz.KisaNot
@@ -79,7 +82,11 @@ import dev.kokpit.anaekran.veri.VeriBaglayici
  *  - climate or apps panel open when the car starts driving: the panel closes and the drive
  *    screen comes (the road needs the speed, and a passive panel has nothing to finish);
  *    when the car stops with a panel open, the panel stays and closing it lands on park;
- *  - door/boot: the warning layer (UyariKatmani) above whatever screen is in front.
+ *  - door/boot: the warning layer (UyariKatmani) above whatever screen is in front;
+ *  - CarPlay (K-115, Y-22, [carplayKapisiniAc]): ZLINK grows out of the CarPlay button
+ *    (ActivityOptions.makeScaleUpAnimation) while all of Kokpit steps back and darkens
+ *    ([CarPlayKapisi]); coming back to the front it steps forward again, no intro clip.
+ *    Harita and Telefon open ZLINK the plain way (Y-22 draws the door for CarPlay only).
  *
  * Drive scene (0.2, K-94/K-95; by day too since 0.2.1, K-108; [surusKatmaniniGuncelle]): its own
  * root layer between the scene picture and the video. Shown with the drive screen in front, once
@@ -111,6 +118,10 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
 
     /** Hidden diagnostics (long press on the frame counter). */
     lateinit var teshis: TeshisPaneli
+        private set
+
+    /** The CarPlay door's step back / forward (tests read it). */
+    lateinit var kapi: CarPlayKapisi
         private set
 
     private val ekranlar get() = katmanlar.ekranlar
@@ -206,7 +217,15 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         AracHaritasi.yukle(this)
 
         katmanlar = katmanlariKur()
-        setContentView(katmanlar.kok)
+        // The content view holds the root layers and, above them, the CarPlay door's cover;
+        // only the root layers are scaled (Y-22).
+        val kap = FrameLayout(this)
+        kap.addView(katmanlar.kok, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        val ortu = View(this)
+        kap.addView(ortu, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        kapi = CarPlayKapisi(kap, katmanlar.kok, ortu, ana)
+        kapi.dondur = ::kapiDondur
+        setContentView(kap)
         TamEkran.kur(this)
 
         ekranlar.gecisOncesi = ::gecisOncesi
@@ -521,7 +540,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
      */
     private fun hizDongusunuGuncelle() {
         if (!::hizDongusu.isInitialized) return
-        val etkin = devam && ekranlar.gecerli == Ekran.SURUS && !teshis.acik
+        val etkin = devam && ekranlar.gecerli == Ekran.SURUS && !teshis.acik && !kapi.donuk
         hizDongusu.etkin = etkin
         hizDongusu.yenile()
         ana.removeCallbacks(hizEtiketi)
@@ -580,12 +599,76 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
                 PaketAcici.Sonuc.YOK -> not.goster(getString(R.string.not_muzik_yok))
                 PaketAcici.Sonuc.HATA -> not.goster(getString(R.string.not_acilamadi, getString(s.ad)))
             }
+            AltCubuk.Simge.CARPLAY -> carplayKapisiniAc()
             else -> when (PaketAcici.ac(this, PaketAcici.ZLINK)) {
                 PaketAcici.Sonuc.ACILDI -> Unit
                 PaketAcici.Sonuc.YOK -> not.goster(getString(R.string.not_zlink_yok, getString(s.ad)))
                 PaketAcici.Sonuc.HATA -> not.goster(getString(R.string.not_acilamadi, getString(s.ad)))
             }
         }
+    }
+
+    /**
+     * The CarPlay door (K-115, Y-22). ZLINK is started first, in the tap's turn, with
+     * makeScaleUpAnimation from the button's rectangle; the system runs that window transition
+     * with its own duration. Kokpit's step back starts in the same turn (Y-22 draws both on
+     * 0–320 ms), only once the start was accepted: a missing / refused ZLINK is known before any
+     * frame, so nothing moves and the calm note shows. While the door is opening a second tap
+     * does nothing (the cover swallows it; [CarPlayKapisi.acilabilir] for direct calls).
+     */
+    private fun carplayKapisiniAc() {
+        if (!kapi.acilabilir) return
+        val d = altCubuk.dugme(AltCubuk.Simge.CARPLAY)
+        val secenek = if (d.width > 0 && d.height > 0) {
+            ActivityOptions.makeScaleUpAnimation(d, 0, 0, d.width, d.height).toBundle()
+        } else {
+            null
+        }
+        val ad = getString(AltCubuk.Simge.CARPLAY.ad)
+        when (PaketAcici.ac(this, PaketAcici.ZLINK, secenek)) {
+            PaketAcici.Sonuc.ACILDI -> {
+                val (x, y) = kokIcindeMerkez(d)
+                kapi.acildi(x, y)
+            }
+            PaketAcici.Sonuc.YOK -> {
+                kapi.geriAl()
+                not.goster(getString(R.string.not_zlink_yok, ad))
+            }
+            PaketAcici.Sonuc.HATA -> {
+                kapi.geriAl()
+                not.goster(getString(R.string.not_acilamadi, ad))
+            }
+        }
+    }
+
+    /**
+     * Centre of [v] in the root layers' own (unscaled) coordinates: Y-22's pivot is the CarPlay
+     * button's centre (design 216, 978). Before the first layout, the design value.
+     */
+    private fun kokIcindeMerkez(v: View): Pair<Float, Float> {
+        val kok = katmanlar.kok
+        if (v.width <= 0 || v.height <= 0) return u(CARPLAY_MERKEZ_X).toFloat() to u(CARPLAY_MERKEZ_Y).toFloat()
+        var x = v.left + v.width / 2f
+        var y = v.top + v.height / 2f
+        var p = v.parent
+        while (p is ViewGroup && p !== kok) {
+            x += p.left - p.scrollX
+            y += p.top - p.scrollY
+            p = p.parent
+        }
+        return x to y
+    }
+
+    /**
+     * The door's animation holds the per-frame loops so the hardware layer's picture stays still
+     * (a running drive scene would redraw the full-screen layer every frame on the AC8227L):
+     * the drive scene stops and the HUD loop is off for its span; the speed digits and the road
+     * stand still for 320 / 360 ms behind the darkening.
+     */
+    private fun kapiDondur(d: Boolean) {
+        val s = surusSahnesi
+        if (d) s?.dur() else if (devam) s?.basla()
+        hizDongusunuGuncelle()
     }
 
     /** The calm note line (tests read it). */
@@ -708,6 +791,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             "Kare hızı sayacı: ${hareket?.sayac?.text ?: "—"}",
             surusSatiri(),
             hizSatiri(),
+            kapiSatiri(),
             "",
         ) + Teshis.satirlar()
     }
@@ -733,6 +817,18 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         } + if (s.hazir) "" else " (istenen ${if (s.gunduz) "gündüz" else "gece"} çözülüyor)"
         return "Sürüş sahnesi: $durum · set $set · tempo $tempo · yarıya iniş ${t.yariyaInisSayisi} · " +
             "ekran ${String.format(java.util.Locale.ROOT, "%.1f", hz)} Hz · son hız ${String.format(java.util.Locale.ROOT, "%.1f", s.sonHizMs * MS_KMH)} km/sa"
+    }
+
+    /** CarPlay door (Y-22): state and the measured tap → onPause time. */
+    private fun kapiSatiri(): String {
+        val durum = when (kapi.durum) {
+            CarPlayKapisi.Durum.KAPALI -> "kapalı"
+            CarPlayKapisi.Durum.ACILIYOR -> "açılıyor"
+            CarPlayKapisi.Durum.ARKADA -> "CarPlay önde"
+            CarPlayKapisi.Durum.DONUYOR -> "dönüyor"
+        }
+        return "CarPlay kapısı: $durum · son açılış ${kapi.sonAyrilmaMs?.let { "$it ms (dokunuş → arkaya geçiş)" } ?: "—"} · " +
+            "ZLINK gelmedi ${kapi.geriAlmaSayisi} kez"
     }
 
     /** Who reads the smoothed speed now (K-96 single reader). */
@@ -770,6 +866,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             hizDongusu.uyandir()
         }
         devam = true
+        // Back through the CarPlay door: step forward (Y-22), the loops held until it ends.
+        kapi.devamEdildi()
+        if (kapi.donuk) surusSahnesi?.dur()
         hizDongusunuGuncelle()
         // onTrimMemory may have emptied the cache while away: the cover must be ready (Ö-2).
         if (surusGorunur) Gorseller.al(resources, ortuResmi()) {}
@@ -779,6 +878,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     override fun onPause() {
+        kapi.duraklatildi()
         devam = false
         hizDongusunuGuncelle()
         Hiz.yumusatici.uyandir = null
@@ -791,6 +891,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     override fun onDestroy() {
+        kapi.birak()
         for (b in baglayicilar.asReversed()) b.birak()
         ana.removeCallbacksAndMessages(null)
         // A pending cover decode (Gorseller callback) must not run a scene change any more.
@@ -848,6 +949,10 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
 
         /** Unknown/stale check while the loops are stopped. */
         private const val ETIKET_MS = 1000L
+
+        /** Y-22 pivot fallback: the CarPlay button's centre, design px (174 + 84/2, 932 + 92/2). */
+        private const val CARPLAY_MERKEZ_X = 216
+        private const val CARPLAY_MERKEZ_Y = 978
 
         /** Retry interval while waiting for the still car's decode before a change away from the drive scene. */
         private const val ORTU_BEKLEME_MS = 400L

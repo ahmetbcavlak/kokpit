@@ -247,6 +247,31 @@ class OnizlemeTest {
         g.pause().stop().destroy()
     }
 
+    /**
+     * 0.2.2 CarPlay door (Y-22 frame 02): half-way and at the end of the 320 ms step back —
+     * Kokpit at 0.94 about the CarPlay button, 42 % brightness. (ZLINK's own window, which the
+     * system grows from the button meanwhile, is not drawn here.)
+     */
+    @Test
+    fun carplayKapisiOnizleme() {
+        SahteVeri.uygula(SahteVeri.parkGece())
+        val c = TestYardim.acVeGec()
+        val a = c.get()
+        TestYardim.gecisleriBitir()
+        dev.kokpit.anaekran.hareket.HareketTestYardim.gercekSure()
+        try {
+            a.katmanlar.altCubuk.dugme(AltCubuk.Simge.CARPLAY).performClick()
+            dev.kokpit.anaekran.hareket.HareketTestYardim.bekle(160)
+            cek(a, "26-carplay-acilis-orta")
+            dev.kokpit.anaekran.hareket.HareketTestYardim.bekle(200)
+            assertEquals(dev.kokpit.anaekran.arayuz.CarPlayKapisi.OLCEK, a.katmanlar.kok.scaleX, 1e-4f)
+            cek(a, "27-carplay-acilis-son")
+        } finally {
+            org.robolectric.shadows.ShadowChoreographer.setPaused(false)
+        }
+        c.pause().stop().destroy()
+    }
+
     private fun cek(a: MainActivity, ad: String) {
         val v: View = a.window.decorView
         v.measure(View.MeasureSpec.makeMeasureSpec(768, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(1024, View.MeasureSpec.EXACTLY))
