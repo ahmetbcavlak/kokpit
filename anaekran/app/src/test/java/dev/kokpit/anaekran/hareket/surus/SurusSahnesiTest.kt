@@ -451,4 +451,26 @@ class SurusSahnesiTest {
             Arkaplan.yurutucu = eski
         }
     }
+
+    @Test
+    fun gizleyipHemenBirakinca_bekleyenSetGirmez() {
+        // 0.2.1 review (İ-F21): birak() clears every message of the scene's handler, so the set
+        // install posted by a hide just before does not run on a released scene.
+        val eski = Arkaplan.yurutucu
+        Arkaplan.yurutucu = java.util.concurrent.Executor { it.run() }
+        try {
+            s.varliklariYukle(gunduz = true)
+            shadowOf(Looper.getMainLooper()).idle() // decoded, waiting (the scene is visible)
+            var n = 0
+            s.hazirOlunca = { n++ }
+            s.visibility = View.INVISIBLE // posts the install
+            s.birak()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(0, n)
+            assertEquals(null, s.kuruluGunduz)
+            assertEquals(null, s.govdeGorunumu.drawable)
+        } finally {
+            Arkaplan.yurutucu = eski
+        }
+    }
 }

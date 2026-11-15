@@ -45,8 +45,26 @@ import java.util.concurrent.atomic.AtomicInteger
  * Life cycle (VeriBaglayici): [basla] in onResume starts it with a read at once, [dur] in onPause stops
  * it. A door warning does not matter while another app is in front, but on return the state must be
  * right at once, hence the immediate read; reading in the background would cost CPU for nothing.
- * The values stay as they were while stopped (their times tell how old they are), so a door that
- * closed meanwhile gives a "Kapı kapandı." on return — true, if late.
+ *
+ * While stopped the door state is UNKNOWN, not the last value (0.2.2 review R1 ÖNEMLİ-1): [dur]
+ * writes kapiAcik/bagajAcik/kapilar = null when the properties are the source, and the first pass
+ * after [basla] writes the current values whatever was written before. So a door that closed while
+ * another app was in front gives null → false on return, which is not a "Kapı kapandı." (that is
+ * true → false only, UyariKatmani), and a stale "Kapı açık" is never on screen after a return; a door
+ * still open gives null → true, the warning as usual. A pass already running when [dur] comes is
+ * dropped where its values land (main thread, generation check), so it cannot overwrite the null.
+ * Decision on the long-press silence (UyariKatmani.sustur): the null is a change of value, so a
+ * warning the user silenced comes back on return if the door is still open. Why: the silence is
+ * for the warning in front of the user now; after leaving the app (often a long CarPlay drive) the
+ * door may have been closed and opened again, and an open door on return — maybe while driving —
+ * must be seen. Cost if wrong: with a stuck property ("2" that never clears) one more long press
+ * after each return.
+ *
+ * Decision (R1 KÜÇÜK-6): [birincil] is sticky for the process. If the properties become unreadable
+ * later (every read null), doors and boot stay unknown and the accessibility path does NOT take
+ * over again: one source per process run, no flapping between two sources with different timing
+ * (a switch back could itself show a false "Kapı kapandı."). Teshis shows "okuma okunamıyor" then.
+ * Cost if wrong: no door warning for the rest of that run; the next process start picks again.
  *
  * Threads: every pass runs on one worker (HandlerThread "kokpit-kapi-ozellik"), never on main.
  */
@@ -74,6 +92,8 @@ class KapiOzellikleri internal constructor(
     private var okuyucu: OzellikOkuyucu? = null
     private var sonHam: List<String?>? = null
     private var sonYazilan: Yazilan? = null
+    /** Generation [sonYazilan] belongs to: a new [basla] writes its first values in any case. */
+    private var yazilanNesil = -1
     private var sonrakiAyar = 0L
 
     /** For tests: the reader in use ("yansıma" / "getprop"), null before the first pass. */
@@ -86,10 +106,22 @@ class KapiOzellikleri internal constructor(
         zamanlayici.sonra(0L, gecis(n))
     }
 
-    /** onPause: no more passes (a pass already running finishes; its write is still valid data). */
+    /**
+     * onPause: no more passes, and the door state becomes unknown (see the class notes). A pass
+     * already running finishes its read, but its write is dropped on main (generation changed).
+     * Main thread (VeriBaglayici); the null write runs at once there.
+     */
     fun dur() {
         nesil.incrementAndGet()
         zamanlayici.temizle()
+        AracVerisi.guncelle {
+            // Checked where it lands: with the accessibility path as source this class owns nothing.
+            if (birincil) {
+                kapiAcik(null)
+                bagajAcik(null)
+                kapilar(AracDurumu.KAPILAR_BILINMIYOR)
+            }
+        }
     }
 
     /** onDestroy: stopped for good, worker thread ended. */
@@ -101,7 +133,7 @@ class KapiOzellikleri internal constructor(
     private fun gecis(n: Int): Runnable = Runnable {
         if (n != nesil.get()) return@Runnable
         val sonraki = try {
-            tara()
+            tara(n)
         } catch (t: Throwable) {
             Teshis.hata("kapı özellikleri", t)
             BEKLEME_ARALIK_MS
@@ -109,8 +141,8 @@ class KapiOzellikleri internal constructor(
         if (n == nesil.get()) zamanlayici.sonra(sonraki, gecis(n))
     }
 
-    /** One pass on the worker. Returns the delay until the next one. */
-    private fun tara(): Long {
+    /** One pass on the worker, of generation [n]. Returns the delay until the next one. */
+    private fun tara(n: Int): Long {
         val simdi = saat()
         if (simdi >= sonrakiAyar) {
             sonrakiAyar = simdi + AYAR_ARALIK_MS
@@ -142,7 +174,7 @@ class KapiOzellikleri internal constructor(
             birincil = true
             Teshis.kapiOlayi("kaynak: sistem özellikleri (erişilebilirlik artık yazmaz)")
         }
-        if (birincil) yaz(ham)
+        if (birincil) yaz(ham, n)
 
         return when {
             o !is GetpropOkuyucu -> ARALIK_MS
@@ -151,9 +183,14 @@ class KapiOzellikleri internal constructor(
         }
     }
 
-    private fun yaz(ham: List<String?>) {
+    private fun yaz(ham: List<String?>, n: Int) {
         val cozulen = ham.map { KapiOzellikCozumu.deger(it) }
         val yeni = Yazilan(cozulen.subList(0, 4).toList(), cozulen[4])
+        // First pass after basla(): dur() wrote null meanwhile, so the values go out even if unchanged.
+        if (n != yazilanNesil) {
+            yazilanNesil = n
+            sonYazilan = null
+        }
         val zorla = yenidenYaz
         if (!zorla && yeni == sonYazilan) return
         yenidenYaz = false
@@ -163,10 +200,13 @@ class KapiOzellikleri internal constructor(
         val kapi = KapiOzellikCozumu.kapiAcik(kapilar)
         val bagaj = yeni.bagaj
         AracVerisi.guncelle {
-            kapilar(kapilar)
-            kapiAcik(kapi)
-            bagajAcik(bagaj)
-            kapiKaynagi(KapiKaynagi.OZELLIK)
+            // dur() came after this pass started: its null stays (the values are for a stopped run).
+            if (n == nesil.get()) {
+                kapilar(kapilar)
+                kapiAcik(kapi)
+                bagajAcik(bagaj)
+                kapiKaynagi(KapiKaynagi.OZELLIK)
+            }
         }
     }
 
@@ -230,10 +270,19 @@ class KapiOzellikleri internal constructor(
                     }
                 }
                 String(tampon, 0, n, Charsets.UTF_8).trim()
+            } catch (e: InterruptedException) {
+                // Nobody interrupts this worker today; keep the flag for whoever does.
+                Thread.currentThread().interrupt()
+                null
             } catch (t: Throwable) {
                 null
             } finally {
-                runCatching { p?.destroy() }
+                // Closed here, not left to destroy() (R1 KÜÇÜK-7a): the pipes' descriptors on every path.
+                p?.let { s ->
+                    runCatching { s.inputStream.close() }
+                    runCatching { s.errorStream.close() }
+                    runCatching { s.destroy() }
+                }
             }
         }
     }
@@ -263,13 +312,22 @@ class KapiOzellikleri internal constructor(
         fun bitir()
     }
 
-    /** One HandlerThread, started on first use. */
+    /**
+     * One HandlerThread, started on first use. After [bitir] it never starts another one (R1
+     * KÜÇÜK-5): a pass that checked its generation just before birak() and then asks for the next
+     * pass must not open a thread nobody would end.
+     */
     internal class IsciZamanlayici : Zamanlayici {
         private var isci: HandlerThread? = null
         private var handler: Handler? = null
+        private var bitti = false
+
+        /** Tests: a worker thread exists now. */
+        internal val isciVar: Boolean @Synchronized get() = isci != null
 
         @Synchronized
         override fun sonra(gecikmeMs: Long, r: Runnable) {
+            if (bitti) return
             val h = handler ?: HandlerThread("kokpit-kapi-ozellik").let { t ->
                 t.start()
                 isci = t
@@ -285,6 +343,7 @@ class KapiOzellikleri internal constructor(
 
         @Synchronized
         override fun bitir() {
+            bitti = true
             handler?.removeCallbacksAndMessages(null)
             isci?.quitSafely()
             isci = null

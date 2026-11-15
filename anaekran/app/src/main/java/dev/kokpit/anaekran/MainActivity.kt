@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -18,7 +19,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import dev.kokpit.anaekran.arayuz.AltCubuk
 import dev.kokpit.anaekran.arayuz.AracHaritasi
-import dev.kokpit.anaekran.arayuz.CarPlayKapisi
+import dev.kokpit.anaekran.arayuz.CarPlayGecisi
 import dev.kokpit.anaekran.arayuz.Gorseller
 import dev.kokpit.anaekran.arayuz.IsikCizgisi
 import dev.kokpit.anaekran.arayuz.KisaNot
@@ -83,10 +84,13 @@ import dev.kokpit.anaekran.veri.VeriBaglayici
  *    screen comes (the road needs the speed, and a passive panel has nothing to finish);
  *    when the car stops with a panel open, the panel stays and closing it lands on park;
  *  - door/boot: the warning layer (UyariKatmani) above whatever screen is in front;
- *  - CarPlay (K-115, Y-22, [carplayKapisiniAc]): ZLINK grows out of the CarPlay button
+ *  - CarPlay (K-115, Y-22, [carplayGecisiniAc]): ZLINK grows out of the CarPlay button
  *    (ActivityOptions.makeScaleUpAnimation) while all of Kokpit steps back and darkens
- *    ([CarPlayKapisi]); coming back to the front it steps forward again, no intro clip.
- *    Harita and Telefon open ZLINK the plain way (Y-22 draws the door for CarPlay only).
+ *    ([CarPlayGecisi]); coming back to the front it steps forward again, no intro clip.
+ *    Harita and Telefon open ZLINK the plain way (Y-22 draws the transition for CarPlay only).
+ *  - intro clip only on a cold start ([AcilisKarari]): when the system re-creates the
+ *    activity in the same boot without the unit having slept (the process was killed while
+ *    another app was in front), the clip is skipped and the target screen comes at once.
  *
  * Drive scene (0.2, K-94/K-95; by day too since 0.2.1, K-108; [surusKatmaniniGuncelle]): its own
  * root layer between the scene picture and the video. Shown with the drive screen in front, once
@@ -120,8 +124,8 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     lateinit var teshis: TeshisPaneli
         private set
 
-    /** The CarPlay door's step back / forward (tests read it). */
-    lateinit var kapi: CarPlayKapisi
+    /** The CarPlay transition's step back / forward (tests read it). */
+    lateinit var carplay: CarPlayGecisi
         private set
 
     private val ekranlar get() = katmanlar.ekranlar
@@ -139,6 +143,10 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         private set
     private var acilisHedefi = Ekran.PARK
     private var acilisSahnesi = 0
+
+    /** What this onCreate decided about the intro clip (tests, diagnostics). */
+    var acilisKarari: AcilisKarari.Sonuc = AcilisKarari.Sonuc(sicak = false, gecenMs = null, uykuMs = null)
+        private set
 
     /** The park/drive state the screens follow (changes act, repeats do not). */
     private var uygulananHal: HareketHali? = null
@@ -217,14 +225,14 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         AracHaritasi.yukle(this)
 
         katmanlar = katmanlariKur()
-        // The content view holds the root layers and, above them, the CarPlay door's cover;
+        // The content view holds the root layers and, above them, the CarPlay transition's cover;
         // only the root layers are scaled (Y-22).
         val kap = FrameLayout(this)
         kap.addView(katmanlar.kok, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         val ortu = View(this)
         kap.addView(ortu, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        kapi = CarPlayKapisi(kap, katmanlar.kok, ortu, ana)
-        kapi.dondur = ::kapiDondur
+        carplay = CarPlayGecisi(kap, katmanlar.kok, ortu, ana)
+        carplay.dondur = ::gecisDondur
         setContentView(kap)
         TamEkran.kur(this)
 
@@ -254,7 +262,14 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             it.videoGorunurlugu = { video -> sahneGorunur(!video) }
             surusSahnesiniKur(it)
         }
-        acilisiBaslat()
+        acilisKarari = AcilisKarari.karar(savedInstanceState, SystemClock.elapsedRealtime(), SystemClock.uptimeMillis())
+        acilisiBaslat(acilisKarari.sicak)
+    }
+
+    /** For [AcilisKarari]: when the system re-creates us later, was it a return or a new start? */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        AcilisKarari.kaydet(outState, SystemClock.elapsedRealtime(), SystemClock.uptimeMillis())
     }
 
     /**
@@ -354,12 +369,17 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     /**
      * Wiring step 3: the intro clip plays, its fade lands on the target screen's scene and its
      * `bitti` shows that screen. Taps during the clip go to [HareketBaglayici.kes] (its own tap
-     * shield, and the intro screen's click).
+     * shield, and the intro screen's click). [sicakYenidenKurulum] ([AcilisKarari]): the system
+     * re-created us on a return — no clip, no intro screen, the target screen at once.
      */
-    private fun acilisiBaslat() {
+    private fun acilisiBaslat(sicakYenidenKurulum: Boolean) {
         acilisHedefi = if (AracVerisi.durum.hareketHali == HareketHali.SURUS) Ekran.SURUS else Ekran.PARK
         uygulananHal = AracVerisi.durum.hareketHali
         acilisSahnesi = sahneKaynagi(acilisHedefi)
+        if (sicakYenidenKurulum) {
+            acilisiBitir(null)
+            return
+        }
         val h = hareket
         if (h == null) {
             ekranlar.goster(Ekran.ACILIS)
@@ -540,7 +560,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
      */
     private fun hizDongusunuGuncelle() {
         if (!::hizDongusu.isInitialized) return
-        val etkin = devam && ekranlar.gecerli == Ekran.SURUS && !teshis.acik && !kapi.donuk
+        val etkin = devam && ekranlar.gecerli == Ekran.SURUS && !teshis.acik && !carplay.donuk
         hizDongusu.etkin = etkin
         hizDongusu.yenile()
         ana.removeCallbacks(hizEtiketi)
@@ -599,7 +619,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
                 PaketAcici.Sonuc.YOK -> not.goster(getString(R.string.not_muzik_yok))
                 PaketAcici.Sonuc.HATA -> not.goster(getString(R.string.not_acilamadi, getString(s.ad)))
             }
-            AltCubuk.Simge.CARPLAY -> carplayKapisiniAc()
+            AltCubuk.Simge.CARPLAY -> carplayGecisiniAc()
             else -> when (PaketAcici.ac(this, PaketAcici.ZLINK)) {
                 PaketAcici.Sonuc.ACILDI -> Unit
                 PaketAcici.Sonuc.YOK -> not.goster(getString(R.string.not_zlink_yok, getString(s.ad)))
@@ -609,15 +629,17 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     /**
-     * The CarPlay door (K-115, Y-22). ZLINK is started first, in the tap's turn, with
+     * The CarPlay transition (K-115, Y-22). ZLINK is started first, in the tap's turn, with
      * makeScaleUpAnimation from the button's rectangle; the system runs that window transition
      * with its own duration. Kokpit's step back starts in the same turn (Y-22 draws both on
      * 0–320 ms), only once the start was accepted: a missing / refused ZLINK is known before any
-     * frame, so nothing moves and the calm note shows. While the door is opening a second tap
-     * does nothing (the cover swallows it; [CarPlayKapisi.acilabilir] for direct calls).
+     * frame, so nothing moves and the calm note shows. While it is opening a second tap
+     * does nothing (the cover swallows it; [CarPlayGecisi.acilabilir] for direct calls).
      */
-    private fun carplayKapisiniAc() {
-        if (!kapi.acilabilir) return
+    private fun carplayGecisiniAc() {
+        if (!carplay.acilabilir) return
+        // Before the start call (a synchronous binder call): the diagnostics measure from the tap.
+        val dokunus = SystemClock.uptimeMillis()
         val d = altCubuk.dugme(AltCubuk.Simge.CARPLAY)
         val secenek = if (d.width > 0 && d.height > 0) {
             ActivityOptions.makeScaleUpAnimation(d, 0, 0, d.width, d.height).toBundle()
@@ -628,14 +650,14 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
         when (PaketAcici.ac(this, PaketAcici.ZLINK, secenek)) {
             PaketAcici.Sonuc.ACILDI -> {
                 val (x, y) = kokIcindeMerkez(d)
-                kapi.acildi(x, y)
+                carplay.acildi(x, y, dokunus)
             }
             PaketAcici.Sonuc.YOK -> {
-                kapi.geriAl()
+                carplay.geriAl()
                 not.goster(getString(R.string.not_zlink_yok, ad))
             }
             PaketAcici.Sonuc.HATA -> {
-                kapi.geriAl()
+                carplay.geriAl()
                 not.goster(getString(R.string.not_acilamadi, ad))
             }
         }
@@ -660,12 +682,12 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     /**
-     * The door's animation holds the per-frame loops so the hardware layer's picture stays still
-     * (a running drive scene would redraw the full-screen layer every frame on the AC8227L):
-     * the drive scene stops and the HUD loop is off for its span; the speed digits and the road
-     * stand still for 320 / 360 ms behind the darkening.
+     * The CarPlay transition's animation holds the per-frame loops so the hardware layer's picture
+     * stays still (a running drive scene would redraw the full-screen layer every frame on the
+     * AC8227L): the drive scene stops and the HUD loop is off for its span; the speed digits and
+     * the road stand still for 320 / 360 ms behind the darkening, and run again in between.
      */
-    private fun kapiDondur(d: Boolean) {
+    private fun gecisDondur(d: Boolean) {
         val s = surusSahnesi
         if (d) s?.dur() else if (devam) s?.basla()
         hizDongusunuGuncelle()
@@ -787,11 +809,11 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             "Klima (çözülen): ${d.klima ?: "—"}",
             "Erişilebilirlik servisi ayarı: ${if (ErisilebilirlikDurumu.etkinMi(this)) "açık" else "kapalı"}",
             "Klip: ${olcum?.let { "${it.klip} · ilk kare ${it.ilkKareMs?.let { ms -> "$ms ms" } ?: "gelmedi"} · bırakma ${it.birakmaMs?.let { ms -> "$ms ms" } ?: "—"}" } ?: "ölçülmedi"}",
-            "Kapı kayıtları: liste dışı pencere ${Teshis.listeDisiPencere} · zaman aşımıyla düşen ${Teshis.kapiZamanAsimi}",
             "Kare hızı sayacı: ${hareket?.sayac?.text ?: "—"}",
             surusSatiri(),
             hizSatiri(),
-            kapiSatiri(),
+            carplaySatiri(),
+            acilisSatiri(),
             "",
         ) + Teshis.satirlar()
     }
@@ -819,16 +841,23 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             "ekran ${String.format(java.util.Locale.ROOT, "%.1f", hz)} Hz · son hız ${String.format(java.util.Locale.ROOT, "%.1f", s.sonHizMs * MS_KMH)} km/sa"
     }
 
-    /** CarPlay door (Y-22): state and the measured tap → onPause time. */
-    private fun kapiSatiri(): String {
-        val durum = when (kapi.durum) {
-            CarPlayKapisi.Durum.KAPALI -> "kapalı"
-            CarPlayKapisi.Durum.ACILIYOR -> "açılıyor"
-            CarPlayKapisi.Durum.ARKADA -> "CarPlay önde"
-            CarPlayKapisi.Durum.DONUYOR -> "dönüyor"
+    /** Intro clip on this onCreate ([AcilisKarari]), for the car test of the cold / warm rule. */
+    private fun acilisSatiri(): String {
+        val k = acilisKarari
+        val ayrinti = k.gecenMs?.let { g -> " · kayıttan ${g / 1000} sn sonra, uyku ${(k.uykuMs ?: 0L) / 1000} sn" }.orEmpty()
+        return "Açılış: " + (if (k.sicak) "klip atlandı (sistem yeniden kurdu)" else "klip oynadı (soğuk açılış)") + ayrinti
+    }
+
+    /** CarPlay transition (Y-22): state and the measured tap → onPause time. */
+    private fun carplaySatiri(): String {
+        val durum = when (carplay.durum) {
+            CarPlayGecisi.Durum.KAPALI -> "kapalı"
+            CarPlayGecisi.Durum.ACILIYOR -> "açılıyor"
+            CarPlayGecisi.Durum.ARKADA -> "CarPlay önde"
+            CarPlayGecisi.Durum.DONUYOR -> "dönüyor"
         }
-        return "CarPlay kapısı: $durum · son açılış ${kapi.sonAyrilmaMs?.let { "$it ms (dokunuş → arkaya geçiş)" } ?: "—"} · " +
-            "ZLINK gelmedi ${kapi.geriAlmaSayisi} kez"
+        return "CarPlay geçişi: $durum · son açılış ${carplay.sonAyrilmaMs?.let { "$it ms (dokunuş → arkaya geçiş)" } ?: "—"} · " +
+            "ZLINK gelmedi ${carplay.geriAlmaSayisi} kez"
     }
 
     /** Who reads the smoothed speed now (K-96 single reader). */
@@ -866,9 +895,9 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
             hizDongusu.uyandir()
         }
         devam = true
-        // Back through the CarPlay door: step forward (Y-22), the loops held until it ends.
-        kapi.devamEdildi()
-        if (kapi.donuk) surusSahnesi?.dur()
+        // Back through the CarPlay transition: step forward (Y-22), the loops held until it ends.
+        carplay.devamEdildi()
+        if (carplay.donuk) surusSahnesi?.dur()
         hizDongusunuGuncelle()
         // onTrimMemory may have emptied the cache while away: the cover must be ready (Ö-2).
         if (surusGorunur) Gorseller.al(resources, ortuResmi()) {}
@@ -878,7 +907,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     override fun onPause() {
-        kapi.duraklatildi()
+        carplay.duraklatildi()
         devam = false
         hizDongusunuGuncelle()
         Hiz.yumusatici.uyandir = null
@@ -891,7 +920,7 @@ class MainActivity : Activity(), AltCubuk.Olaylar, AracDinleyici, TemaDinleyici,
     }
 
     override fun onDestroy() {
-        kapi.birak()
+        carplay.birak()
         for (b in baglayicilar.asReversed()) b.birak()
         ana.removeCallbacksAndMessages(null)
         // A pending cover decode (Gorseller callback) must not run a scene change any more.

@@ -55,6 +55,8 @@ object Teshis {
     @Volatile var kapiZamanAsimi: Int = 0
     /** Popups that went within 1.5 s of a click in them: taken as closed by the user (X), state unknown. */
     @Volatile var kullaniciKapatti: Int = 0
+    /** KapiServisi has TYPE_VIEW_CLICKED in its subscription now (only while a popup is up and the properties are not the source). */
+    @Volatile var tiklamaAboneligi: Boolean = false
     private val kapiOlaylari = ArrayDeque<String>()
 
     // --- Door properties (KapiOzellikleri) ---
@@ -142,7 +144,7 @@ object Teshis {
                 " · kaynak ${kaynakMetni(AracVerisi.durum.kapiKaynagi)} · okuma $kapiOzellikOkuma · son değişim ${once(kapiOzellikDegisim)}",
             "can_ignore_doorinfo: $canIgnoreDoorinfo",
             "Kapı servisi: ${if (kapiServisiBagli) "bağlı" else "bağlı değil"} · liste dışı pencere $listeDisiPencere · zaman aşımı $kapiZamanAsimi" +
-                " · kullanıcı kapattı $kullaniciKapatti",
+                " · kullanıcı kapattı $kullaniciKapatti · tıklama aboneliği ${if (tiklamaAboneligi) "açık" else "kapalı"}",
         ) + kapiOlaylari().takeLast(5).map { "  $it" } + listOfNotNull(sonHata?.let { "Hata: $it" })
     }
 
@@ -163,7 +165,7 @@ object Teshis {
         yayinAlicisi = "kayıtlı değil"; yapiskanGeldi = false
         konumIzni = null; gps = "başlamadı"; konumSayisi = 0; hizsizKonumSayisi = 0; sonKonumZamani = 0L
         konumAraligi.sifirla(); hamHiz = null; hizDogrulugu = null; dogrulukluKonumSayisi = 0
-        kapiServisiBagli = false; listeDisiPencere = 0; kapiZamanAsimi = 0; kullaniciKapatti = 0
+        kapiServisiBagli = false; listeDisiPencere = 0; kapiZamanAsimi = 0; kullaniciKapatti = 0; tiklamaAboneligi = false
         kapiOzellikHam = null; kapiOzellikOkuma = "başlamadı"; kapiOzellikDegisim = 0L; canIgnoreDoorinfo = "okunmadı"
         synchronized(kapiOlaylari) { kapiOlaylari.clear() }
         sonHata = null

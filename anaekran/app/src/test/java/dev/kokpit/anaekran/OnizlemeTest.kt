@@ -248,12 +248,12 @@ class OnizlemeTest {
     }
 
     /**
-     * 0.2.2 CarPlay door (Y-22 frame 02): half-way and at the end of the 320 ms step back —
+     * 0.2.2 CarPlay transition (Y-22 frame 02): half-way and at the end of the 320 ms step back —
      * Kokpit at 0.94 about the CarPlay button, 42 % brightness. (ZLINK's own window, which the
      * system grows from the button meanwhile, is not drawn here.)
      */
     @Test
-    fun carplayKapisiOnizleme() {
+    fun carplayGecisiOnizleme() {
         SahteVeri.uygula(SahteVeri.parkGece())
         val c = TestYardim.acVeGec()
         val a = c.get()
@@ -264,7 +264,7 @@ class OnizlemeTest {
             dev.kokpit.anaekran.hareket.HareketTestYardim.bekle(160)
             cek(a, "26-carplay-acilis-orta")
             dev.kokpit.anaekran.hareket.HareketTestYardim.bekle(200)
-            assertEquals(dev.kokpit.anaekran.arayuz.CarPlayKapisi.OLCEK, a.katmanlar.kok.scaleX, 1e-4f)
+            assertEquals(dev.kokpit.anaekran.arayuz.CarPlayGecisi.OLCEK, a.katmanlar.kok.scaleX, 1e-4f)
             cek(a, "27-carplay-acilis-son")
         } finally {
             org.robolectric.shadows.ShadowChoreographer.setPaused(false)

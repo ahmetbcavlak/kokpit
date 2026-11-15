@@ -312,6 +312,7 @@ class SurusSahnesi(
 
     /** A waiting set goes in once the scene is hidden (posted: never inside the caller's hide). */
     private fun kurBekleyen() {
+        if (birakildi) return
         val v = bekleyen ?: return
         if (visibility == VISIBLE && kurulu != null) return
         bekleyen = null
@@ -361,11 +362,14 @@ class SurusSahnesi(
         uyandir()
     }
 
-    /** onDestroy: stops for good, drops the bitmaps' views. */
+    /**
+     * onDestroy: stops for good, drops the bitmaps' views. Every message of this scene's handler
+     * goes (the poll, and a posted [kurBekleyen] from a hide just before), not only the poll.
+     */
     fun birak() {
         dur()
         birakildi = true
-        ana.removeCallbacks(yoklama)
+        ana.removeCallbacksAndMessages(null)
         govde.setImageDrawable(null)
         for (v in tekerOn + tekerArka) v.setImageDrawable(null)
         arka.isik = null

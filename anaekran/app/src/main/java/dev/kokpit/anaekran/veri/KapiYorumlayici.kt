@@ -98,20 +98,45 @@ object KapiMetni {
  *
  * Closed by the user (0.2.2 fix): the popup has a close (X) button, and a popup the user closed says
  * nothing about the door, which may still be open. A com.hcn.autocan TYPE_VIEW_CLICKED in a window
- * ([tiklama]) followed within [KAPATMA_MS] by that window leaving the list counts as "closed by the
- * user": its flags go back to unknown (null), not to closed (false), so no "Kapı kapandı." follows.
+ * ([tiklama]) at most [KAPATMA_MS] before that window leaves the list, or while its leaving is
+ * still being held (below), counts as "closed by the user": its flags go back to unknown (null),
+ * not to closed (false), so no "Kapı kapandı." follows.
  * The criterion is the click's window and time only: Keşif 0.7's UI dump of the button's view id was
  * not carried into the code or the guide, so no id or position is matched (the click's class and text
  * go to the diagnostics, for a narrower criterion later). A click whose window id is unknown (-1 or a
  * window not seen) counts for every door window of the package. Any click is enough: a popup that
  * closes by itself within 1.5 s of an unrelated click in it becomes "unknown", the safe side.
+ *
+ * Order of click and leaving (R1 ÖNEMLİ-2): on API 27 View.performClick sends TYPE_VIEW_CLICKED
+ * after the onClick listener, so the window may already be gone from the list when the click is
+ * interpreted. A listed window that leaves is therefore not decided at once: its record is HELD
+ * for [kapanisBeklemesi] (still counted as open) and the service schedules another pass after that
+ * time ([kapanisBekleniyor]); a click that comes in meanwhile still makes it "closed by the user".
+ * The click's time is the time the event arrived (the service takes it on the event's own thread
+ * and passes it in), not the time the worker got to it. If the vendor's X removes the window
+ * before the click event is even sent (View detached first), no click comes at all: then the
+ * result is "closed", as in 0.2 — Teshis' event list shows whether "tıklama" lines appear.
+ *
+ * Decision (R1 KÜÇÜK-10): after the user's X our own door warning goes too (kapiAcik null: the park
+ * HUD shows "—"), although the door may still be open. Why: on this path the popup is the only
+ * evidence; with it gone the state is unknown, and K-74 shows only verified data — "unknown" is
+ * neither "open" nor "closed". The user dismissed the vendor's warning on purpose and is not given a
+ * second one for the same popup. Cost if wrong: a door left open after an X is not warned about
+ * until the vendor shows its popup again. Not on the properties path, where the X changes nothing.
  */
-class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealtime() }) {
+class KapiYorumlayici(
+    private val saat: () -> Long = { SystemClock.elapsedRealtime() },
+    /** How long a listed window that left is held before it counts as closed (tests of other rules pass 0). */
+    private val kapanisBeklemesi: Long = KAPANIS_BEKLEME_MS,
+) {
 
     /** A window as the service saw it: id, package, class name, texts (node text and descriptions). */
     data class Pencere(val id: Int, val paket: String?, val sinif: String?, val metinler: List<CharSequence?>)
 
-    private class Kayit(var okunan: KapiMetni.Okunan, var sinif: String, var listede: Boolean, var sonOlay: Long)
+    private class Kayit(var okunan: KapiMetni.Okunan, var sinif: String, var listede: Boolean, var sonOlay: Long) {
+        /** When the listed window was first missing from the list ([YOK] while it is on screen). */
+        var kayboldu: Long = YOK
+    }
 
     private val kayitlar = LinkedHashMap<Int, Kayit>()
     private val listeDisiSayilan = HashSet<Int>()
@@ -138,6 +163,18 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
 
     /** Some record waits for the window list to confirm it (the service then schedules a later pass). */
     fun dogrulanmamisVar(): Boolean = kayitlar.values.any { !it.listede }
+
+    /** Some listed window has left and is held (the service schedules a pass after [kapanisBeklemesi]). */
+    fun kapanisBekleniyor(): Boolean = kayitlar.values.any { it.kayboldu != YOK }
+
+    /** A door/boot record exists: a popup is (or was just) on screen. The service subscribes to clicks only then. */
+    fun kayitVar(): Boolean = kayitlar.isNotEmpty()
+
+    /** The hold, for the service's later pass. */
+    val bekleme: Long get() = kapanisBeklemesi
+
+    /** This interpreter's clock (any thread): the service stamps a click with it on arrival. */
+    fun simdi(): Long = saat()
 
     private fun kaydet(id: Int, okunan: KapiMetni.Okunan, sinif: String?, listede: Boolean, olay: Boolean) {
         if (okunan.bos) return
@@ -166,19 +203,24 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
     }
 
     /**
-     * TYPE_VIEW_CLICKED. Returns false when the event is not com.hcn.autocan's (ignored). Only the time
-     * is kept; the record's flags change when (and if) the window then leaves the list.
+     * TYPE_VIEW_CLICKED at [an] (this interpreter's clock, taken when the event arrived). Returns
+     * false when the event is not com.hcn.autocan's (ignored). Only the time is kept; the record's
+     * flags change when (and if) the window then leaves the list.
      */
-    fun tiklama(paket: CharSequence?, pencereId: Int): Boolean {
+    fun tiklama(paket: CharSequence?, pencereId: Int, an: Long = saat()): Boolean {
         if (paket?.toString() != KapiMetni.PAKET) return false
         val bilinen = pencereId >= 0 && (pencereId in kayitlar || pencereId in sonListe)
-        tiklamalar[if (bilinen) pencereId else HER_PENCERE] = saat()
+        val anahtar = if (bilinen) pencereId else HER_PENCERE
+        tiklamalar[anahtar] = maxOf(an, tiklamalar[anahtar] ?: Long.MIN_VALUE)
         return true
     }
 
-    /** A click in window [id] (or of unknown window) at most [KAPATMA_MS] before [simdi]. */
-    private fun yeniTiklandi(id: Int, simdi: Long): Boolean =
-        listOfNotNull(tiklamalar[id], tiklamalar[HER_PENCERE]).any { simdi - it in 0..KAPATMA_MS }
+    /**
+     * A click in window [id] (or of unknown window) from [KAPATMA_MS] before the window left
+     * ([kayboldu]) up to [simdi] (a click that came while the leaving was held counts too).
+     */
+    private fun tiklandi(id: Int, kayboldu: Long, simdi: Long): Boolean =
+        listOfNotNull(tiklamalar[id], tiklamalar[HER_PENCERE]).any { it in (kayboldu - KAPATMA_MS)..simdi }
 
     /**
      * The result of one getWindows() pass. [okunamayan]: ids whose root node was briefly not
@@ -189,7 +231,10 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
         for (p in liste) {
             if (p.paket != KapiMetni.PAKET) continue
             gorulen += p.id
-            kayitlar[p.id]?.listede = true
+            kayitlar[p.id]?.let {
+                it.listede = true
+                it.kayboldu = YOK // back in the list: not leaving after all
+            }
             kaydet(p.id, KapiMetni.sinifla(p.metinler), p.sinif, listede = true, olay = false)
         }
         sonListe = gorulen + sonListe.filter { it in okunamayan }
@@ -198,8 +243,9 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
         while (it.hasNext()) {
             val (id, k) = it.next()
             if (id in gorulen || id in okunamayan) continue
+            if (k.listede && k.kayboldu == YOK) k.kayboldu = simdi
             when {
-                k.listede && yeniTiklandi(id, simdi) -> {
+                k.listede && tiklandi(id, k.kayboldu, simdi) -> {
                     // Closed by the user (X): the door/boot it showed is unknown now, not closed.
                     it.remove()
                     if (k.okunan.kapi) kapiGoruldu = false
@@ -207,7 +253,9 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
                     Teshis.kullaniciKapatti++
                     Teshis.kapiOlayi("pencere $id kullanıcı kapattı → bilinmiyor")
                 }
-                k.listede -> it.remove() // was on screen, is gone by itself: closed
+                // Was on screen, is gone by itself (no click during the hold): closed.
+                k.listede && simdi - k.kayboldu >= kapanisBeklemesi -> it.remove()
+                k.listede -> Unit // held: a click may still come (the service looks again)
                 simdi - k.sonOlay >= ZAMAN_ASIMI_MS -> {
                     it.remove()
                     Teshis.kapiZamanAsimi++
@@ -215,9 +263,10 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
                 listeDisiSayilan.add(id) -> Teshis.listeDisiPencere++
             }
         }
-        // Clicks are only kept for windows still on screen (and the package-wide one while it is fresh).
+        // Clicks are only kept for windows still on screen or held (and the package-wide one while it
+        // can still count for a held window).
         tiklamalar.entries.removeAll { (id, t) ->
-            if (id == HER_PENCERE) simdi - t > KAPATMA_MS else id !in gorulen && id !in okunamayan
+            if (id == HER_PENCERE) simdi - t > KAPATMA_MS + kapanisBeklemesi else id !in gorulen && id !in okunamayan && id !in kayitlar
         }
     }
 
@@ -242,6 +291,13 @@ class KapiYorumlayici(private val saat: () -> Long = { SystemClock.elapsedRealti
         const val ZAMAN_ASIMI_MS = 10_000L
         /** A window that leaves the list this soon after a click in it was closed by the user. */
         const val KAPATMA_MS = 1_500L
+        /**
+         * A listed window that left is held this long before it counts as closed (R1 ÖNEMLİ-2: 300–500 ms).
+         * 400 ms: a click event sent after the window went needs one binder hop and the worker's queue;
+         * the "Kapı kapandı." comes this much later for a real close, under a glance.
+         */
+        const val KAPANIS_BEKLEME_MS = 400L
         private const val HER_PENCERE = Int.MIN_VALUE
+        private const val YOK = Long.MIN_VALUE
     }
 }

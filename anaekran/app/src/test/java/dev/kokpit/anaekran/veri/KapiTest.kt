@@ -28,18 +28,25 @@ class KapiTest {
     private val BASKA = "com.example.baska"
 
     private val gecikenler = ArrayList<Runnable>()
+    private val gecikmeler = ArrayList<Long>()
+    private val abonelikler = ArrayList<Boolean>()
 
     @Before
     fun hazirla() {
         KapiOzellikleri.testSifirla() // the properties are not the source here: the 0.2 path writes
         KapiServisi.yurutucu = Executor { it.run() }
-        KapiServisi.gecikmeli = { _, r -> gecikenler += r }
+        KapiServisi.gecikmeli = { ms, r -> gecikmeler += ms; gecikenler += r }
+        // The 0.2 rules are tested without the closing hold; the hold has its own tests below.
+        KapiServisi.kapanisBeklemesi = 0L
+        KapiServisi.abonelikKaydi = { abonelikler += it }
     }
 
     @After
     fun temizle() {
         KapiServisi.yurutucu = null
         KapiServisi.gecikmeli = null
+        KapiServisi.kapanisBeklemesi = null
+        KapiServisi.abonelikKaydi = null
         AracVerisi.sifirla()
         Teshis.sifirla()
         KapiOzellikleri.testSifirla()
@@ -88,7 +95,7 @@ class KapiTest {
 
     @Test
     fun yorumlayici_kapiBagajKapandi() {
-        val y = KapiYorumlayici()
+        val y = KapiYorumlayici(kapanisBeklemesi = 0)
         assertNull(y.kapiAcik())
         assertNull(y.bagajAcik())
 
@@ -121,7 +128,7 @@ class KapiTest {
 
     @Test
     fun yorumlayici_baskaPaketVeOkunamayanPencere() {
-        val y = KapiYorumlayici()
+        val y = KapiYorumlayici(kapanisBeklemesi = 0)
         assertFalse(y.durumOlayi(BASKA, "X", listOf("Kapı açık"), 3))
         y.pencereler(listOf(p(3, "Kapı açık", paket = BASKA)))
         assertNull(y.kapiAcik())
@@ -141,7 +148,7 @@ class KapiTest {
     @Test
     fun yorumlayici_listedeGorulmeyenKayit_onSaniyeSonraDuser() {
         var t = 0L
-        val y = KapiYorumlayici { t }
+        val y = KapiYorumlayici({ t }, 0)
         y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Kapı açık"), 11)
         assertTrue(y.dogrulanmamisVar())
         t = 5_000
@@ -157,7 +164,7 @@ class KapiTest {
     @Test
     fun yorumlayici_listedeDogrulanmisKayitZamanAsimiYok() {
         var t = 0L
-        val y = KapiYorumlayici { t }
+        val y = KapiYorumlayici({ t }, 0)
         y.pencereler(listOf(p(7, "Kapı açık")))
         t = 600_000 // ten minutes with the door open
         y.pencereler(listOf(p(7, "Kapı açık")))
@@ -169,7 +176,7 @@ class KapiTest {
     @Test
     fun yorumlayici_listeOlaydanOnceGelirse_takilmaz() {
         // TYPE_WINDOWS_CHANGED pass first (window without text yet), then the state event.
-        val y = KapiYorumlayici { 0L }
+        val y = KapiYorumlayici({ 0L }, 0)
         y.pencereler(listOf(p(7)))
         y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Kapı açık"), 7)
         assertEquals(true, y.kapiAcik())
@@ -180,7 +187,7 @@ class KapiTest {
 
     @Test
     fun yorumlayici_ayniPencereKapidanBagaja() {
-        val y = KapiYorumlayici { 0L }
+        val y = KapiYorumlayici({ 0L }, 0)
         y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Kapı açık"), 7)
         y.durumOlayi(AUTOCAN, "CanDoorWindow", listOf("Bagaj açık"), 7)
         assertEquals(false, y.kapiAcik())
@@ -192,7 +199,7 @@ class KapiTest {
     @Test
     fun yorumlayici_XileKapatilinca_bilinmiyor() {
         var t = 0L
-        val y = KapiYorumlayici { t }
+        val y = KapiYorumlayici({ t }, 0)
         y.pencereler(listOf(p(7, "Kapı açık")))
         assertEquals(true, y.kapiAcik())
         t = 1_000
@@ -206,7 +213,7 @@ class KapiTest {
     @Test
     fun yorumlayici_tiklamadanGecKapaninca_kapandi() {
         var t = 0L
-        val y = KapiYorumlayici { t }
+        val y = KapiYorumlayici({ t }, 0)
         y.pencereler(listOf(p(7, "Kapı açık"), p(8, "Bagaj açık")))
         t = 1_000
         y.tiklama(AUTOCAN, 7)
@@ -230,7 +237,7 @@ class KapiTest {
     @Test
     fun yorumlayici_penceresiBilinmeyenTiklama_hepsineSayilir() {
         var t = 0L
-        val y = KapiYorumlayici { t }
+        val y = KapiYorumlayici({ t }, 0)
         y.pencereler(listOf(p(7, "Kapı açık")))
         y.tiklama(AUTOCAN, -1)
         t = 500
@@ -280,6 +287,180 @@ class KapiTest {
         // Still read only.
         assertTrue(sh.globalActionsPerformed.isEmpty())
         assertTrue(sh.gesturesDispatched.isEmpty())
+    }
+
+    // --- Click after the window left (R1 ÖNEMLİ-2): the leaving is held, then decided ---
+
+    @Test
+    fun yorumlayici_tiklamaKaybolmadanSonraGelirse_bilinmiyor() {
+        var t = 0L
+        val y = KapiYorumlayici({ t }) // the real hold
+        assertEquals(KapiYorumlayici.KAPANIS_BEKLEME_MS, y.bekleme)
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        // The X removed the window first; the pass sees it gone before the click event came.
+        t = 1_000
+        y.pencereler(emptyList())
+        assertEquals("held, not closed yet", true, y.kapiAcik())
+        assertTrue(y.kapanisBekleniyor())
+        t = 1_150
+        assertTrue(y.tiklama(AUTOCAN, 7, an = 1_050)) // stamped when the event arrived
+        t = 1_000 + KapiYorumlayici.KAPANIS_BEKLEME_MS
+        y.pencereler(emptyList())
+        assertNull("closed by the user: unknown, no \"Kapı kapandı.\"", y.kapiAcik())
+        assertFalse(y.kapanisBekleniyor())
+        assertEquals(1, Teshis.kullaniciKapatti)
+    }
+
+    @Test
+    fun yorumlayici_tiklamasizKaybolma_beklemedenSonraKapandi() {
+        var t = 0L
+        val y = KapiYorumlayici({ t })
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        t = 1_000
+        y.pencereler(emptyList())
+        t = 1_000 + KapiYorumlayici.KAPANIS_BEKLEME_MS - 1
+        y.pencereler(emptyList()) // another pass during the hold decides nothing
+        assertEquals(true, y.kapiAcik())
+        t = 1_000 + KapiYorumlayici.KAPANIS_BEKLEME_MS
+        y.pencereler(emptyList())
+        assertEquals(false, y.kapiAcik()) // went by itself: closed
+        assertEquals(0, Teshis.kullaniciKapatti)
+    }
+
+    @Test
+    fun yorumlayici_bekletilirkenGeriGelirse_acikKalir() {
+        var t = 0L
+        val y = KapiYorumlayici({ t })
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        t = 1_000
+        y.pencereler(emptyList()) // briefly missing from one list
+        t = 1_200
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        assertFalse(y.kapanisBekleniyor())
+        t = 5_000
+        y.pencereler(listOf(p(7, "Kapı açık")))
+        assertEquals(true, y.kapiAcik())
+        // A click long before the window finally goes is not the X.
+        y.tiklama(AUTOCAN, 7, an = 5_000)
+        t = 9_000
+        y.pencereler(emptyList())
+        t = 9_000 + KapiYorumlayici.KAPANIS_BEKLEME_MS
+        y.pencereler(emptyList())
+        assertEquals(false, y.kapiAcik())
+    }
+
+    @Test
+    fun servis_tersSira_onceKaybolmaSonraTiklama() {
+        KapiServisi.kapanisBeklemesi = null // the real 400 ms
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        val sh = shadowOf(s)
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+        gecikenler.clear()
+        gecikmeler.clear()
+
+        // The window list changes first (the X detached the popup), the click event comes after.
+        sh.setWindows(emptyList())
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, null, null, -1))
+        bosalt()
+        assertEquals("held: still open", true, AracVerisi.durum.kapiAcik)
+        assertEquals(1, gecikenler.size) // one pass after the hold
+        assertTrue(gecikmeler.single() >= KapiYorumlayici.KAPANIS_BEKLEME_MS)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_VIEW_CLICKED, AUTOCAN, null, 7))
+        bosalt()
+        // The click's own pass decides at once: closed by the user, unknown, never "closed".
+        assertNull("the X, not the door: no \"Kapı kapandı.\"", AracVerisi.durum.kapiAcik)
+        assertTrue(Teshis.kapiOlaylari().any { it.contains("kullanıcı kapattı") })
+
+        // The pass planned after the hold finds nothing left and plans nothing more.
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(gecikmeler.single()))
+        gecikenler.removeAt(0).run()
+        bosalt()
+        assertNull(AracVerisi.durum.kapiAcik)
+        assertEquals(1, Teshis.kullaniciKapatti)
+        assertTrue(gecikenler.isEmpty())
+    }
+
+    @Test
+    fun servis_tiklamaZamaniOlayGelinceAlinir() {
+        // Worker jobs held back (a slow getWindows on the unit): the click is stamped on arrival.
+        KapiServisi.kapanisBeklemesi = null
+        val kuyruk = ArrayList<Runnable>()
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        val sh = shadowOf(s)
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        bosalt()
+        KapiServisi.yurutucu = Executor { kuyruk += it }
+        // A click in the popup's body; the worker gets to it 3 s later.
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_VIEW_CLICKED, AUTOCAN, null, 7))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(3_000))
+        kuyruk.toList().forEach { it.run() }
+        kuyruk.clear()
+        KapiServisi.yurutucu = Executor { it.run() }
+        // Then the popup goes by itself (the door closed): the 3 s old click is not the X.
+        sh.setWindows(emptyList())
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, null, null, -1))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(KapiYorumlayici.KAPANIS_BEKLEME_MS + 100))
+        gecikenler.toList().forEach { it.run() }
+        bosalt()
+        assertEquals(false, AracVerisi.durum.kapiAcik)
+        assertEquals(0, Teshis.kullaniciKapatti)
+    }
+
+    // --- Click subscription only while needed (R1 ÖNEMLİ-4) ---
+
+    @Test
+    fun servis_tiklamaAboneligi_yalnizPencereVarkenVeOzellikDegilken() {
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        val sh = shadowOf(s)
+        s.onServiceConnected()
+        bosalt()
+        assertTrue("nothing subscribed without a popup", abonelikler.isEmpty())
+        assertFalse(Teshis.tiklamaAboneligi)
+
+        sh.setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        bosalt()
+        assertEquals(listOf(true), abonelikler)
+        assertTrue(Teshis.tiklamaAboneligi)
+        // Other windows coming and going change nothing.
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, null, null, -1))
+        assertEquals(listOf(true), abonelikler)
+
+        sh.setWindows(emptyList())
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, null, null, -1))
+        bosalt()
+        assertEquals(listOf(true, false), abonelikler)
+        assertFalse(Teshis.tiklamaAboneligi)
+
+        // The properties take over while a popup is up: the next event of any app unsubscribes.
+        sh.setWindows(listOf(pencere(8, AUTOCAN, "Bagaj açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Bagaj açık", 8))
+        assertEquals(listOf(true, false, true), abonelikler)
+        KapiOzellikleri.birincil = true
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_VIEW_CLICKED, BASKA, null, 3))
+        assertEquals(listOf(true, false, true, false), abonelikler)
+        // With the properties as source a popup never subscribes again.
+        sh.setWindows(listOf(pencere(9, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 9))
+        assertEquals(listOf(true, false, true, false), abonelikler)
+        assertTrue(Teshis.kapiOlaylari().any { it.contains("Kapı açık") }) // still read and logged
+    }
+
+    @Test
+    fun servis_gercekAbonelik_robolectrictePatlamaz() {
+        // Without the test hook the service calls its own get/setServiceInfo (no connection here: nothing).
+        KapiServisi.abonelikKaydi = null
+        val s = Robolectric.setupService(KapiServisi::class.java)
+        shadowOf(s).setWindows(listOf(pencere(7, AUTOCAN, "Kapı açık")))
+        s.onAccessibilityEvent(olay(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, AUTOCAN, "Kapı açık", 7))
+        bosalt()
+        assertEquals(true, AracVerisi.durum.kapiAcik)
+        assertNull(Teshis.sonHata)
     }
 
     // --- The service with Robolectric's accessibility shadows ---

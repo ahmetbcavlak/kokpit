@@ -62,15 +62,23 @@ class KapiOzellikleriTest {
         val sonrakiGecikme: Long get() = bekleyen.single().first
     }
 
+    /** A stream that remembers whether it was closed. */
+    private class IzliAkis(b: ByteArray) : ByteArrayInputStream(b) {
+        var kapandi = false
+        override fun close() { kapandi = true; super.close() }
+    }
+
     private class SahteSurec(
         private val cikti: String,
         private val biter: Boolean = true,
         private val kod: Int = 0,
     ) : Process() {
         var yokEdildi = false
+        val girdi = IzliAkis(cikti.toByteArray())
+        val hata = IzliAkis(ByteArray(0))
         override fun getOutputStream(): OutputStream = ByteArrayOutputStream()
-        override fun getInputStream(): InputStream = ByteArrayInputStream(cikti.toByteArray())
-        override fun getErrorStream(): InputStream = ByteArrayInputStream(ByteArray(0))
+        override fun getInputStream(): InputStream = girdi
+        override fun getErrorStream(): InputStream = hata
         override fun waitFor(): Int = kod
         override fun waitFor(timeout: Long, unit: TimeUnit): Boolean = biter
         override fun exitValue(): Int = if (biter) kod else throw IllegalThreadStateException()
@@ -286,6 +294,99 @@ class KapiOzellikleriTest {
         assertTrue(zaman.bekleyen.isEmpty())
     }
 
+    // --- Away from the app (R1 ÖNEMLİ-1): unknown while stopped, no late "Kapı kapandı." ---
+
+    @Test
+    fun dur_kapiBilinmiyor_donusteGuncelDegerYazilir() {
+        okuyucu.ayarla("2", "1", "1", "1", "2")
+        val o = ozellikler()
+        o.basla()
+        zaman.adim()
+        assertEquals(true, d.kapiAcik)
+        assertEquals(true, d.bagajAcik)
+
+        o.dur() // onPause: CarPlay comes to the front
+        assertNull(d.kapiAcik)
+        assertNull(d.bagajAcik)
+        assertEquals(AracDurumu.KAPILAR_BILINMIYOR, d.kapilar)
+        assertEquals(KapiKaynagi.OZELLIK, d.kapiKaynagi)
+
+        // Closed while away: on return null → false (no confirmation: that is true → false only).
+        okuyucu.ayarla("1", "1", "1", "1", "1")
+        o.basla()
+        zaman.adim()
+        assertEquals(false, d.kapiAcik)
+        assertEquals(false, d.bagajAcik)
+
+        // Unchanged values are still written after a stop: the null in between must be replaced.
+        o.dur()
+        o.basla()
+        zaman.adim()
+        assertEquals(false, d.kapiAcik)
+        assertEquals(listOf<Boolean?>(false, false, false, false), d.kapilar)
+    }
+
+    @Test
+    fun dur_erisilebilirlikKaynakkenDokunmaz() {
+        // Properties never readable: the accessibility path owns the state, dur() leaves it alone.
+        val o = ozellikler()
+        o.basla()
+        zaman.adim()
+        assertFalse(KapiOzellikleri.birincil)
+        AracVerisi.guncelle { kapiAcik(true); kapiKaynagi(KapiKaynagi.ERISILEBILIRLIK) }
+        o.dur()
+        assertEquals(true, d.kapiAcik)
+    }
+
+    @Test
+    fun durGecisSirasindaGelirse_yazmaDusurulur() {
+        var durdur: (() -> Unit)? = null
+        val araya = object : KapiOzellikleri.OzellikOkuyucu {
+            override val ad = "yansıma"
+            var n = 0
+            override fun oku(ozellik: String): String? {
+                if (++n == 3) durdur?.invoke()
+                return okuyucu.oku(ozellik)
+            }
+        }
+        okuyucu.ayarla("2", "1", "1", "1", "1")
+        val o = ozellikler(araya)
+        o.basla()
+        zaman.adim()
+        assertEquals(true, d.kapiAcik)
+
+        // The door closes; onPause comes while the worker is in the middle of the next pass.
+        okuyucu.ayarla("1", "1", "1", "1", "1")
+        araya.n = 0
+        durdur = { o.dur() }
+        zaman.adim()
+        assertNull("the stopped pass does not overwrite the null", d.kapiAcik)
+        assertTrue("and plans no next pass", zaman.bekleyen.isEmpty())
+
+        // Back: the current value, no stale "open" and no true → false.
+        durdur = null
+        o.basla()
+        zaman.adim()
+        assertEquals(false, d.kapiAcik)
+    }
+
+    @Test
+    fun isciZamanlayici_bitirdenSonraIsParcacigiAcmaz() {
+        // R1 KÜÇÜK-5: a pass that asks for the next one after birak() must not start a new thread.
+        val z = KapiOzellikleri.IsciZamanlayici()
+        val calisti = java.util.concurrent.CountDownLatch(1)
+        z.sonra(0L, Runnable { calisti.countDown() })
+        assertTrue(calisti.await(2, TimeUnit.SECONDS))
+        assertTrue(z.isciVar)
+        z.bitir()
+        assertFalse(z.isciVar)
+        z.sonra(0L, Runnable { throw AssertionError("ran after bitir") })
+        assertFalse("no thread after bitir", z.isciVar)
+        z.temizle()
+        z.bitir() // twice: harmless
+        assertFalse(z.isciVar)
+    }
+
     @Test
     fun uygulamaIciSifirlama_sonrakiGecisYenidenYazar() {
         okuyucu.ayarla("2", "1", "1", "1", "1")
@@ -410,6 +511,8 @@ class KapiOzellikleriTest {
         biter = true; kod = 1
         assertNull(g.oku("persist.vendor.cem.cardoor3")) // failed
         assertTrue(surecler.all { it.yokEdildi })
+        // The pipes are closed on every path, the time-out and the failure too (R1 KÜÇÜK-7a).
+        assertTrue(surecler.all { it.girdi.kapandi && it.hata.kapandi })
         assertEquals(4, surecler.size)
 
         // Only the five fixed names ever reach a process.

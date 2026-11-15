@@ -26,11 +26,24 @@ import java.util.concurrent.atomic.AtomicInteger
  * read, 0.2 adds it.
  *
  * 0.2.2 (K-116): once the vendor's system properties can be read ([KapiOzellikleri.birincil]), they are
- * the door source and this service writes no door state any more; it keeps interpreting and logging
- * to [Teshis] only. While they cannot be read, it writes exactly as in 0.2, with one fix: a popup the
- * user closed with its X gives "unknown", not "closed" (TYPE_VIEW_CLICKED, see [KapiYorumlayici]).
- * Click events come from every app as well (no packageNames); anything not com.hcn.autocan's is dropped
- * at once, on the binder thread, before any of its content is looked at.
+ * the door source and this service writes no door state any more; it still reads com.hcn.autocan's
+ * windows and logs them to [Teshis] only. While they cannot be read, it writes exactly as in 0.2,
+ * with one fix: a popup the user closed with its X gives "unknown", not "closed" (TYPE_VIEW_CLICKED,
+ * see [KapiYorumlayici]).
+ *
+ * Click subscription (R1 ÖNEMLİ-4): TYPE_VIEW_CLICKED is NOT in res/xml/kapi_servisi.xml. The service
+ * adds it to its own subscription (setServiceInfo — this service's event types only, nothing of the
+ * car or the system) only while it is needed: the properties are not the source AND a com.hcn.autocan
+ * door/boot record exists (a popup is on screen, or its leaving is being held), and takes it away
+ * again as soon as either stops. Decision — why this narrower option and not "off once the
+ * properties are the source" alone: a click only matters while a door popup is up, so the stream of
+ * every app's clicks (their text included) into this process, and the cost of every app building
+ * click events, is limited to those seconds instead of the whole drive; with the properties as
+ * source it is never on. The subscription follows the first popup event within milliseconds, long
+ * before a hand reaches the X. Cost if wrong: if setServiceInfo does not take effect on the unit,
+ * no click arrives and an X closes as "Kapı kapandı." like 0.2 (Teshis: "tıklama aboneliği", the
+ * event list's "tıklama" lines). Clicks that do arrive are dropped at once unless com.hcn.autocan's,
+ * before any of their content is looked at.
  *
  * Runs on its own, bound by the system, independent of the Activity's life cycle. Same process as the
  * app, so it writes through [AracVerisi.guncelle], which moves the write to the main looper (decision 8).
@@ -38,7 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class KapiServisi : AccessibilityService() {
 
-    private val yorumlayici = KapiYorumlayici()
+    private val yorumlayici = KapiYorumlayici(kapanisBeklemesi = kapanisBeklemesi ?: KapiYorumlayici.KAPANIS_BEKLEME_MS)
     private var isci: HandlerThread? = null
     private var isciHandler: Handler? = null
 
@@ -55,6 +68,12 @@ class KapiServisi : AccessibilityService() {
     /** Last values handed to AracVerisi (worker thread only); the write itself lands later on main. */
     private var sonKapi: Boolean? = null
     private var sonBagaj: Boolean? = null
+
+    /** TYPE_VIEW_CLICKED is in this service's subscription now (worker thread only; the XML has none). */
+    private var tiklamaAbone = false
+
+    /** A pass after the yorumlayici's closing hold is scheduled (worker thread only). */
+    private var kapanisPlanli = false
 
     override fun onCreate() {
         super.onCreate()
@@ -100,21 +119,27 @@ class KapiServisi : AccessibilityService() {
                     taramaIste()
                 }
                 AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                    // Stamped on arrival, not when the worker gets to it (R1 ÖNEMLİ-2b).
+                    val an = yorumlayici.simdi()
                     val paket = e.packageName?.toString()
-                    if (paket != KapiMetni.PAKET) return
+                    if (paket != KapiMetni.PAKET) {
+                        // A click still arriving although not needed (properties took over, popup gone): unsubscribe.
+                        if (KapiOzellikleri.birincil) calistir { aboneligiAyarla() }
+                        return
+                    }
                     // Copied before the event is recycled: window id, class and text only (no getSource()).
                     val id = e.windowId
                     val sinif = e.className?.toString().orEmpty()
                     val metin = (ArrayList<CharSequence?>(e.text).apply { add(e.contentDescription) })
                         .filterNotNull().joinToString(" | ")
                     calistir {
-                        yorumlayici.tiklama(paket, id)
+                        yorumlayici.tiklama(paket, id, an)
                         Teshis.kapiOlayi("tıklama $id $sinif \"$metin\"")
                     }
                     taramaIste()
                 }
                 AccessibilityEvent.TYPE_WINDOWS_CHANGED -> taramaIste()
-                else -> Unit // only the three types above are subscribed (res/xml/kapi_servisi.xml)
+                else -> Unit // only these types are subscribed (res/xml/kapi_servisi.xml + clicks while needed)
             }
         } catch (t: Throwable) {
             Teshis.hata("kapı olayı", t)
@@ -134,11 +159,54 @@ class KapiServisi : AccessibilityService() {
         }
     }
 
-    private fun gecikmeliTara() {
-        val ms = KapiYorumlayici.ZAMAN_ASIMI_MS + 500L
-        val r = Runnable { taramaIste() }
+    private fun gecikmeliTara() = sonraTara(KapiYorumlayici.ZAMAN_ASIMI_MS + 500L, Runnable { taramaIste() })
+
+    private fun sonraTara(ms: Long, r: Runnable) {
         gecikmeli?.let { it(ms, r); return }
         isciHandler?.postDelayed(r, ms)
+    }
+
+    /**
+     * Worker. A listed window left and is held ([KapiYorumlayici.kapanisBekleniyor]): one pass after
+     * the hold decides it (closed, or closed by the user if a click came meanwhile).
+     */
+    private fun kapanisiPlanla() {
+        if (kapanisPlanli || !yorumlayici.kapanisBekleniyor()) return
+        kapanisPlanli = true
+        sonraTara(yorumlayici.bekleme + KAPANIS_PAYI_MS, Runnable {
+            calistir { kapanisPlanli = false }
+            taramaIste()
+        })
+    }
+
+    /**
+     * Worker. Clicks subscribed only while needed (class notes): the properties are not the source
+     * and a door/boot record exists. Changes this service's own event types and nothing else.
+     */
+    private fun aboneligiAyarla() {
+        val iste = !KapiOzellikleri.birincil && yorumlayici.kayitVar()
+        if (iste == tiklamaAbone) return
+        val oldu = abonelikKaydi?.let { it(iste); true } ?: try {
+            val bilgi = serviceInfo
+            if (bilgi == null) {
+                false // not connected (yet): tried again on the next pass
+            } else {
+                bilgi.eventTypes = if (iste) {
+                    bilgi.eventTypes or AccessibilityEvent.TYPE_VIEW_CLICKED
+                } else {
+                    bilgi.eventTypes and AccessibilityEvent.TYPE_VIEW_CLICKED.inv()
+                }
+                serviceInfo = bilgi
+                true
+            }
+        } catch (t: Throwable) {
+            Teshis.hata("tıklama aboneliği", t)
+            false
+        }
+        if (!oldu) return
+        tiklamaAbone = iste
+        Teshis.tiklamaAboneligi = iste
+        Teshis.kapiOlayi("tıklama aboneliği ${if (iste) "açık" else "kapalı"}")
     }
 
     /** Worker thread. */
@@ -175,9 +243,11 @@ class KapiServisi : AccessibilityService() {
             Teshis.kapiOlayi("liste ${liste.joinToString(" ") { "${it.id}:\"${it.metinler.filterNotNull().joinToString(" | ")}\"" }.ifEmpty { "boş" }} → ${yorumlayici.ozet()}")
         }
         yaz()
+        kapanisiPlanla()
     }
 
     private fun yaz() {
+        aboneligiAyarla()
         val n = nesil
         if (n != etkinNesil) return
         // The properties are the source: this service only logs (checked again on main below).
@@ -240,6 +310,7 @@ class KapiServisi : AccessibilityService() {
             sonKapi = null
             sonBagaj = null
             Teshis.kapiOlayi("uygulama içi sıfırlama")
+            aboneligiAyarla()
             val n = nesil
             AracVerisi.guncelle {
                 if (n == etkinNesil && !KapiOzellikleri.birincil) {
@@ -258,6 +329,7 @@ class KapiServisi : AccessibilityService() {
         etkinNesil++
         if (sifirlayici === kendiSifirlayicisi) sifirlayici = null
         Teshis.kapiServisiBagli = false
+        Teshis.tiklamaAboneligi = false
         Teshis.kapiOlayi("servis durdu")
         calistir { yorumlayici.sifirla() }
         AracVerisi.guncelle {
@@ -279,6 +351,13 @@ class KapiServisi : AccessibilityService() {
         @Volatile internal var yurutucu: Executor? = null
         /** Tests catch the delayed re-scan here. null = the worker's postDelayed. */
         @Volatile internal var gecikmeli: ((Long, Runnable) -> Unit)? = null
+        /** Tests: the closing hold of new instances (null = [KapiYorumlayici.KAPANIS_BEKLEME_MS]). */
+        @Volatile internal var kapanisBeklemesi: Long? = null
+        /** Tests record the click subscription here instead of setServiceInfo (null = the real call). */
+        @Volatile internal var abonelikKaydi: ((Boolean) -> Unit)? = null
+
+        /** The pass after a closing hold runs this much after the hold (the clock must have passed it). */
+        private const val KAPANIS_PAYI_MS = 50L
         /** Generation of the live service instance (changes in onCreate and onDestroy). */
         @Volatile internal var etkinNesil = 0
 

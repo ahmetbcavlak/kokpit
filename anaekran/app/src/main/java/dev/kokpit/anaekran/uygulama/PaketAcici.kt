@@ -21,7 +21,7 @@ object PaketAcici {
 
     /**
      * Opens [paket]'s launcher activity. [secenek] is an ActivityOptions bundle for the window
-     * transition (the CarPlay door: ActivityOptions.makeScaleUpAnimation); null = the system's.
+     * transition (the CarPlay transition: ActivityOptions.makeScaleUpAnimation); null = the system's.
      */
     fun ac(ctx: Context, paket: String, secenek: Bundle? = null): Sonuc {
         val intent = try {
@@ -47,10 +47,14 @@ object PaketAcici {
         return baslat(ctx, niyet)
     }
 
+    /** Tests replace the start call (e.g. a refused start, a slow start). null = ctx.startActivity. */
+    @Volatile internal var baslatici: ((Context, Intent, Bundle?) -> Unit)? = null
+
     private fun baslat(ctx: Context, intent: Intent, secenek: Bundle? = null): Sonuc {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return try {
-            ctx.startActivity(intent, secenek)
+            val b = baslatici
+            if (b != null) b(ctx, intent, secenek) else ctx.startActivity(intent, secenek)
             Sonuc.ACILDI
         } catch (e: ActivityNotFoundException) {
             Sonuc.YOK

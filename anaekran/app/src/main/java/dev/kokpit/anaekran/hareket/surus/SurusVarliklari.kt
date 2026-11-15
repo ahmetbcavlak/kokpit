@@ -19,11 +19,16 @@ import kotlin.math.sqrt
  *    there are no city lights by day, so the day set has none ([isik] null).
  *
  * Memory (research decision 15): night body 798×272 (0.83 MiB) + 6 sprites 101×101 (0.23 MiB) +
- * lights 600×60 (0.14 MiB) = 1.20 MiB; day body 798×382 (1.16 MiB) + sprites = 1.40 MiB; the
- * same again as GPU textures. The scene holds one set; on a theme change the other is decoded
- * and the old one dropped once the new one is on the views, so for a moment both exist
- * (≈ 2.6 MiB + the full-screen background 3 MiB, ≈ 5.6 MiB, under the 12 MB budget).
- * [boyutlariYaz] logs it on every load.
+ * lights 600×60 (0.14 MiB) = 1.20 MiB; day body 798×382 (1.16 MiB) + sprites = 1.40 MiB.
+ * Two different sums, not to be mixed:
+ *  - drawn in one frame (the [BUTCE_MB] budget, against HWUI's texture cache): ONE set plus the
+ *    full-screen ground under it (3 MiB) — ≈ 4.2 MiB at night, ≈ 4.4 MiB by day. A set waiting
+ *    for the scene to be hidden (theme change) is not on the views, so it is never drawn with the
+ *    other one. [boyutlariYaz] logs this sum.
+ *  - Java heap, for a moment at a theme change: both sets (≈ 2.6 MiB, the old one is dropped once
+ *    the new one is on the views) plus the full-screen pictures Gorseller keeps (up to three,
+ *    ≈ 3 MiB each: ground, still car, scene picture) — ≈ 11–12 MiB of bitmaps at the peak.
+ *    Uploaded textures of drawn bitmaps come on top in GPU memory, not in the heap.
  */
 class SurusVarliklari(
     val govde: Bitmap,

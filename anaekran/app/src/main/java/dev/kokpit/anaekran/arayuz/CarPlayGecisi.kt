@@ -13,13 +13,15 @@ import android.view.ViewTreeObserver
 import dev.kokpit.anaekran.hareket.Zamanlama
 
 /**
- * The CarPlay door (K-115, design Y-22): Kokpit in front, CarPlay behind. On the CarPlay tap the
+ * The CarPlay transition (K-115, design Y-22; named "geçiş", not "kapı", since 0.2.2 R2 K-8: "kapı"
+ * is the car's door everywhere else): Kokpit in front, CarPlay behind. On the CarPlay tap the
  * whole of Kokpit ([kok], every root layer) steps back — scale 1 → [OLCEK] about the CarPlay
  * button's centre and a black cover ([ortu]) 0 → [ORTU_ALFA] (brightness 42 %) — in [ACILIS_MS],
  * while ZLINK grows out of the button's rectangle (the system window transition, started by
  * MainActivity with ActivityOptions.makeScaleUpAnimation in the same turn). When Kokpit comes
  * back to the front after such an exit it steps forward again: [OLCEK] → 1 and the cover away
- * in [DONUS_MS]. Nothing else changes: the intro clip is not replayed (it only plays in onCreate).
+ * in [DONUS_MS]. Nothing else changes: the intro clip is not replayed (it only plays in onCreate,
+ * and not even there when the system re-creates the activity on a return, AcilisKarari).
  *
  * One animator drives one value, the darkness `k` (0 = normal, 1 = stepped back): scale and
  * cover cannot drift apart, and a reversal (ZLINK did not come, the user came straight back)
@@ -29,17 +31,23 @@ import dev.kokpit.anaekran.hareket.Zamanlama
  * a dark fill only while Kokpit is smaller than the screen (the window background is dropped
  * once the scene is drawn, MainActivity).
  *
+ * The cover is one flat colour: [ortu] says it has no overlapping rendering (R2 K-3), so HWUI
+ * applies its alpha to the single fill instead of promoting it to an off-screen layer (a 768×1024
+ * texture and one more full-screen pass per frame on the AC8227L). Same result: a single draw.
+ *
  * States: [Durum.KAPALI] → (tap, ZLINK started) [Durum.ACILIYOR] → (onPause) [Durum.ARKADA] →
  * (onResume) [Durum.DONUYOR] → [Durum.KAPALI]. From ACILIYOR without an onPause within
  * [ZAMAN_ASIMI_MS] (ZLINK never came to the front) it goes back like a return. While ACILIYOR the
  * cover swallows taps, so a second tap (CarPlay, or Harita/Telefon which open ZLINK too) cannot
  * start a second launch; [acilabilir] is the same guard for direct calls.
  *
- * [dondur] (true at the start of either animation, false at its end or when it is undone) lets
- * MainActivity hold the per-frame loops (drive scene, HUD loop) so the layer's picture stays
- * still: a moving scene would redraw the whole layer every frame on the AC8227L.
+ * [dondur] is true only while an animation runs (R2 K-1): MainActivity holds the per-frame loops
+ * (drive scene, HUD loop) so the layer's picture stays still — a moving scene would redraw the
+ * whole layer every frame on the AC8227L. Once the step back has ended it is released again: if
+ * ZLINK does not come, the speed and the road run on (smaller, behind the cover) while the
+ * timeout waits; when ZLINK did come we are paused by then and the loops stay off anyway.
  */
-class CarPlayKapisi(
+class CarPlayGecisi(
     private val kap: ViewGroup,
     private val kok: View,
     private val ortu: View,
@@ -57,11 +65,11 @@ class CarPlayKapisi(
     /** Hold / release the per-frame loops for the animation's span (see the class notes). */
     var dondur: ((Boolean) -> Unit)? = null
 
-    /** Tap → onPause of the last door opening, ms (diagnostics: tunes [ZAMAN_ASIMI_MS] in the car). */
+    /** Tap → onPause of the last opening, ms, from the tap itself (diagnostics: tunes [ZAMAN_ASIMI_MS] in the car). */
     var sonAyrilmaMs: Long? = null
         private set
 
-    /** Times the door went back without ZLINK coming (timeout), for diagnostics. */
+    /** Times the transition went back without ZLINK coming (timeout), for diagnostics. */
     var geriAlmaSayisi = 0
         private set
 
@@ -89,19 +97,23 @@ class CarPlayKapisi(
         ortu.alpha = 0f
         ortu.visibility = View.GONE
         ortu.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        // One flat fill: no off-screen layer for its alpha (class notes).
+        ortu.forceHasOverlappingRendering(false)
     }
 
     /** An animation runs now (tests: the return starts with the first drawn frame). */
     val oynuyor: Boolean get() = animator != null
 
-    /** A new door opening may start (not while one is already opening). */
+    /** A new opening may start (not while one is already opening). */
     val acilabilir: Boolean get() = durum != Durum.ACILIYOR
 
     /**
      * ZLINK was started (MainActivity, same turn as the tap): Kokpit steps back about
-     * ([pivotX], [pivotY]) in [kok]'s own coordinates — the CarPlay button's centre.
+     * ([pivotX], [pivotY]) in [kok]'s own coordinates — the CarPlay button's centre. [dokunusAni]:
+     * uptimeMillis when the tap was handled, before the start call (R2 K-2: the start is a
+     * synchronous binder call; measuring after it would make [sonAyrilmaMs] look shorter).
      */
-    fun acildi(pivotX: Float, pivotY: Float) {
+    fun acildi(pivotX: Float, pivotY: Float, dokunusAni: Long = SystemClock.uptimeMillis()) {
         if (!acilabilir) return
         ana.removeCallbacks(zamanAsimi)
         ana.removeCallbacks(donusYedek)
@@ -109,8 +121,8 @@ class CarPlayKapisi(
         kok.pivotX = pivotX
         kok.pivotY = pivotY
         durum = Durum.ACILIYOR
-        acilisAni = SystemClock.uptimeMillis()
-        ortu.isClickable = true // swallows taps until we are paused (or the door goes back)
+        acilisAni = dokunusAni
+        ortu.isClickable = true // swallows taps until we are paused (or the transition goes back)
         oynat(1f, ACILIS_MS)
         ana.postDelayed(zamanAsimi, ZAMAN_ASIMI_MS)
     }
@@ -131,7 +143,7 @@ class CarPlayKapisi(
         donusuBaslat()
     }
 
-    /** onPause: an opening door means another app is coming to the front. */
+    /** onPause: an opening transition means another app is coming to the front. */
     fun duraklatildi() {
         if (durum != Durum.ACILIYOR) return
         ana.removeCallbacks(zamanAsimi)
@@ -141,7 +153,7 @@ class CarPlayKapisi(
     }
 
     /**
-     * onResume: if we left through the door, step forward again. The animation starts with the
+     * onResume: if we left through this transition, step forward again. The animation starts with the
      * first frame drawn after the resume (the window is shown again then; started at onResume
      * itself, its first frames would run while the window is still hidden), at the latest after
      * [DONUS_YEDEK_MS].
@@ -224,8 +236,11 @@ class CarPlayKapisi(
                 if (hedef == 0f) {
                     durum = Durum.KAPALI
                     bitir()
+                } else {
+                    // Stepped back (ACILIYOR / ARKADA): stays so until onResume or the timeout, the
+                    // loops released (paused: they stay off; ZLINK did not come: they run on).
+                    dondurmeyiAyarla(false)
                 }
-                // Stepped back (ACILIYOR / ARKADA): stays so, frozen, until onResume or the timeout.
             }
         })
         animator = a
@@ -272,7 +287,7 @@ class CarPlayKapisi(
     }
 
     companion object {
-        /** Y-22: Kokpit's scale behind the open door. */
+        /** Y-22: Kokpit's scale behind the open CarPlay. */
         const val OLCEK = 0.94f
 
         /** Y-22: brightness 42 % → a black cover of 58 %. */
@@ -285,7 +300,7 @@ class CarPlayKapisi(
         const val DONUS_MS = 360L
 
         /**
-         * No onPause this long after the start: ZLINK did not come, the door goes back. The
+         * No onPause this long after the start: ZLINK did not come, the transition goes back. The
          * system pauses us as soon as it accepts the start (before ZLINK's process even runs),
          * normally well under 0.5 s; the diagnostics line shows the measured value.
          */

@@ -397,7 +397,7 @@ class EkranTest {
         assertTrue(m, m.contains("u() ölçeği 1.000"))
         assertTrue(m, m.contains("768×1024"))
         assertTrue(m, m.contains("Klip: "))
-        assertTrue(m, m.contains("zaman aşımıyla düşen"))
+        assertTrue(m, m.contains("Kapı servisi: ") && m.contains("zaman aşımı ")) // the door counters, once (R2 K-8)
         a.teshis.performClick()
         assertFalse(a.teshis.acik)
     }

@@ -18,8 +18,10 @@ import dev.kokpit.anaekran.Katmanlar
  *  - basla (onResume): starts GPS if permitted. The permission dialog pauses and resumes the Activity,
  *    so a fresh grant is picked up here. Starts the door properties ([KapiOzellikleri]) with a read at once.
  *  - dur (onPause): stops GPS and the door properties (the climate receiver stays: values are current
- *    when the app returns). A door warning does not matter while another app is in front; the read at
- *    the next basla makes it right on return, and 4 reads a second in the background would be waste.
+ *    when the app returns). A door warning does not matter while another app is in front; with the
+ *    properties as source the door state is unknown meanwhile (no stale value, no late "Kapı
+ *    kapandı.", see [KapiOzellikleri]), the read at the next basla makes it right on return, and
+ *    4 reads a second in the background would be waste.
  *  - birak (onDestroy): stops GPS and the door properties (worker thread ended), unregisters the receiver.
  *
  * The door service ([KapiServisi]) is not started here: the system binds it on its own once the user
