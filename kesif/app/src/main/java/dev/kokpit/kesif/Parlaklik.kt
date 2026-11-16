@@ -132,7 +132,8 @@ class BrightnessPage(private val a: Activity, onBack: () -> Unit) : Page {
     }
 
     override fun tick() {
-        now.text = Brightness.read(a).joinToString("\n") { "${it.first}: ${it.second}" }
+        now.text = Brightness.read(a).joinToString("\n") { "${it.first}: ${it.second}" } +
+            if (Brightness.mode(a) == "otomatik") "\nMod otomatik: değer yazılsa da ekran değişmeyebilir; bu da bir bulgu." else ""
         val ok = Brightness.canWrite(a) && !Brightness.testing
         test.isEnabled = ok; test.alpha = if (ok) 1f else 0.45f
         if (!Brightness.testing && Brightness.last.isNotEmpty()) result.text = Brightness.last

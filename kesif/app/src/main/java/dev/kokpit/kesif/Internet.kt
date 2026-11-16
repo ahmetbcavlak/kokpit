@@ -128,8 +128,14 @@ class InternetPage(private val a: Activity, onBack: () -> Unit) : Page {
         }
     }
 
+    override fun onShow() {
+        // The Wi-Fi name needs location permission on Android 8.1.
+        if (!GpsGuard.hasPermission(a) && !asked) { asked = true; runCatching { a.requestPermissions(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION), 19) } }
+    }
+    private var asked = false
+
     private fun run(tag: String) {
-        if (InternetProbe.run(a, tag) { tick() }) result.text = "Ölçülüyor ($tag)… en çok 20 sn"
+        if (InternetProbe.run(a, tag) { tick() }) result.text = "Ölçülüyor ($tag)… en çok yarım dakika"
     }
 
     override fun tick() {

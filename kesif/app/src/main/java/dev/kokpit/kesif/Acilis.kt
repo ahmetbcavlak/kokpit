@@ -38,7 +38,7 @@ import android.widget.LinearLayout
  * disarms itself after 24 h. It only listens; it changes nothing.
  */
 object Acilis {
-    const val WINDOW_MS = 180_000L
+    const val WINDOW_MS = 300_000L
     private const val ARM_MS = 24L * 60 * 60 * 1000
     private const val PREFS = "acilis"
     const val KOKPIT = "dev.kokpit.anaekran"
@@ -48,13 +48,19 @@ object Acilis {
     private val lock = Any()
     @Volatile var openingId = 0; private set
     @Volatile var kind = ""; private set
-    @Volatile var startElapsed = 0L; private set
+    /** -1: no opening yet. A cold opening starts at 0 (kernel start). */
+    @Volatile var startElapsed = -1L; private set
+    /** Keşif's process started near boot: counted as a cold opening only once per process. */
+    @Volatile private var processCounted = false
     @Volatile private var startWall = 0L
     private val marks = ArrayList<Mark>()
     private val seen = HashSet<String>()
     @Volatile private var app: Context? = null
 
-    fun active(): Boolean = startElapsed > 0 && SystemClock.elapsedRealtime() - startElapsed < WINDOW_MS
+    fun active(): Boolean = startElapsed >= 0 && SystemClock.elapsedRealtime() - startElapsed < WINDOW_MS
+
+    /** The system booted less than [WINDOW_MS] ago. */
+    fun nearBoot(): Boolean = SystemClock.elapsedRealtime() < WINDOW_MS
 
     fun marks(): List<Mark> = synchronized(lock) { marks.toList() }
 
@@ -112,8 +118,12 @@ object Acilis {
     fun onProcessStart(ctx: Context) {
         app = ctx.applicationContext
         val procStart = if (Build.VERSION.SDK_INT >= 24) Process.getStartElapsedRealtime() else SystemClock.elapsedRealtime()
-        // Keşif started within 3 min of boot and no opening is running: count it as a cold opening.
-        if (!active() && procStart < WINDOW_MS) begin(ctx, "soğuk", 0L, "çekirdek açılışı (BOOT_COMPLETED’ı Keşif açılmadan gelmiş olabilir)")
+        // Within 5 min of boot, once per process: a cold opening (the accessibility service may have
+        // started this process at boot, before any activity).
+        if (!processCounted) {
+            processCounted = true
+            if (nearBoot() && !(active() && kind == "soğuk")) begin(ctx, "soğuk", 0L, "çekirdek açılışı")
+        }
         first("keşif süreci", procStart, "süreç başladı")
         if (armed(ctx)) startService(ctx)
     }
@@ -130,8 +140,10 @@ object Acilis {
         else if (pkg.contains("zlink", true)) first("zlink penceresi", Yol.uptimeToElapsed(eventUptime), pkg)
     }
 
+    /** The sticky copy (the last broadcast before this opening) is kept apart: it is not "first". */
     fun onAirInfo(sticky: Boolean) {
-        first("ilk klima yayını", SystemClock.elapsedRealtime(), if (sticky) "yapışkan (önceki yayın)" else "ACTION_AIR_INFO")
+        if (sticky) first("yapışkan klima yayını (önceki)", SystemClock.elapsedRealtime(), "kayıt anında teslim edilen eski yayın")
+        else first("ilk klima yayını", SystemClock.elapsedRealtime(), "ACTION_AIR_INFO")
     }
 
     fun onFix(l: Location) {
@@ -144,13 +156,31 @@ object Acilis {
 
 /** Boot broadcasts. BOOT_COMPLETED reaches a manifest receiver even on Android 8; the others are tried too. */
 class KesifAcilis : BroadcastReceiver() {
+    companion object {
+        val BOOT = setOf(Intent.ACTION_BOOT_COMPLETED, "android.intent.action.LOCKED_BOOT_COMPLETED",
+            "android.intent.action.QUICKBOOT_POWERON", "android.intent.action.ACTION_BOOT_IPO")
+    }
+
     override fun onReceive(ctx: Context, intent: Intent?) {
         try {
             val now = SystemClock.elapsedRealtime()
             val action = intent?.action.orEmpty()
-            // A boot: the opening started at kernel start (elapsed 0); "sistem hazır" is this broadcast.
-            if (!Acilis.active() || Acilis.kind != "soğuk") Acilis.begin(ctx, "soğuk", 0L, "çekirdek açılışı")
-            Acilis.first("sistem hazır", now, action.substringAfterLast('.'))
+            if (action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                // Keşif was updated: record the result now, and keep an armed measurement going.
+                Updater.checkAfterStart(ctx)
+                if (Acilis.armed(ctx)) Acilis.startService(ctx)
+                return
+            }
+            if (action !in BOOT) return
+            if (Acilis.nearBoot()) {
+                // A boot: the opening started at kernel start (elapsed 0); "sistem hazır" is this broadcast.
+                if (!(Acilis.active() && Acilis.kind == "soğuk")) Acilis.begin(ctx, "soğuk", 0L, "çekirdek açılışı")
+                Acilis.first("sistem hazır", now, action.substringAfterLast('.'))
+            } else {
+                // A quick-boot broadcast long after boot (waking from sleep): an event, not a new opening.
+                Yol.row(ctx, "acilis", "olay", action.substringAfterLast('.'), "açılıştan $now ms")
+                Acilis.first("hızlı açılış yayını", now, action.substringAfterLast('.'))
+            }
             if (Acilis.armed(ctx)) Acilis.startService(ctx)
         } catch (t: Throwable) {
             // Never crash at boot.
@@ -167,6 +197,7 @@ class AcilisServisi : Service() {
     private var screen: BroadcastReceiver? = null
     private var air: BroadcastReceiver? = null
     private var gps: LocationListener? = null
+    private var note: Notification? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -176,20 +207,26 @@ class AcilisServisi : Service() {
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel("acilis", "Açılış ölçümü", NotificationManager.IMPORTANCE_LOW))
         @Suppress("DEPRECATION")
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "acilis") else Notification.Builder(this)
-        val n = b.setSmallIcon(applicationInfo.icon).setContentTitle("Keşif açılışı ölçüyor")
+        note = b.setSmallIcon(android.R.drawable.ic_menu_recent_history).setContentTitle("Keşif açılışı ölçüyor")
             .setContentText("Kontak açılınca zaman çizelgesi kaydedilir · 24 saatte kapanır").setOngoing(true).build()
-        startForeground(41, n)
+        startForeground(41, note)
         val r = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) {
                 try {
                     when (i?.action) {
                         Intent.ACTION_SCREEN_ON -> {
+                            // The 24 h limit counts real time; Handler delays stop while the unit sleeps.
+                            if (!Acilis.armed(this@AcilisServisi)) { stopSelf(); return }
                             Acilis.begin(this@AcilisServisi, "sıcak", SystemClock.elapsedRealtime(), "ekran açıldı")
                             // Keşif already on screen: its next drawn frame is its first of this opening.
                             if (LiveProbe.visible) Acilis.watchFirstFrame()
                             listen()
                         }
-                        Intent.ACTION_SCREEN_OFF -> Yol.row(this@AcilisServisi, "acilis", "olay", "ekran kapandı", "")
+                        Intent.ACTION_SCREEN_OFF -> {
+                            unlisten() // no GPS through sleep
+                            Yol.row(this@AcilisServisi, "acilis", "olay", "ekran kapandı", "")
+                            if (!Acilis.armed(this@AcilisServisi)) stopSelf()
+                        }
                     }
                 } catch (t: Throwable) { }
             }
@@ -200,6 +237,8 @@ class AcilisServisi : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Every startForegroundService() must be answered with startForeground() within 5 s.
+        note?.let { startForeground(41, it) }
         if (!Acilis.armed(this)) { stopSelf(); return START_NOT_STICKY }
         main.removeCallbacks(expire)
         main.postDelayed(expire, (Acilis.armedUntil(this) - System.currentTimeMillis()).coerceAtLeast(1000))
@@ -211,6 +250,7 @@ class AcilisServisi : Service() {
 
     /** GPS and climate broadcasts for the current opening only, then off again. */
     private fun listen() {
+        if (!Acilis.armed(this)) { stopSelf(); return }
         main.removeCallbacks(quiet)
         main.postDelayed(quiet, Acilis.WINDOW_MS)
         if (air == null) {

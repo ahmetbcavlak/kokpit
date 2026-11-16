@@ -41,7 +41,11 @@ class ApkSaglayici : ContentProvider() {
 
     private fun file(): File? = context?.let { Updater.file(it) }?.takeIf { it.isFile }
 
-    override fun onCreate() = true
+    /** Runs at every start of Keşif's process, before anything else: undo an interrupted brightness test. */
+    override fun onCreate(): Boolean {
+        context?.let { c -> runCatching { Brightness.restorePending(c) } }
+        return true
+    }
     override fun getType(uri: Uri) = if (uri.lastPathSegment == NAME) "application/vnd.android.package-archive" else null
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
@@ -162,7 +166,8 @@ object Updater {
                     else -> "indirilen daha eski"
                 }
                 rows += "imza" to if (same) "yüklü Keşif ile aynı" else "FARKLI: yükleyici açılmaz"
-                installable = dl.packageName == app.packageName && same
+                // Same package, same certificate, and not older (an older one could not be installed anyway).
+                installable = dl.packageName == app.packageName && same && me != null && code(dl) >= code(me)
                 status = rows.joinToString("\n") { "${it.first}: ${it.second}" }
             } catch (t: Throwable) {
                 rows += "hata" to "${t.javaClass.simpleName} ${t.message.orEmpty().take(160)}"
@@ -219,6 +224,8 @@ object Updater {
         val detail = data?.extras?.let { b -> b.keySet().joinToString(" · ") { "${it.substringAfterLast('.')}=${runCatching { @Suppress("DEPRECATION") b.get(it) }.getOrNull()}" } }.orEmpty()
         status += "\nyükleyici: $text"
         Yol.row(ctx, "guncelleme", "akis", "yükleyici sonucu", text, detail)
+        // Keşif was not replaced: nothing to check at the next start.
+        if (resultCode != Activity.RESULT_OK) ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
     /** At every start: was an update started, and did Keşif's version change since? */

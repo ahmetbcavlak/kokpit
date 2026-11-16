@@ -25,7 +25,8 @@ object TouchStats {
 
     private val taps = ArrayList<Tap>()
 
-    @Synchronized fun add(t: Tap) { if (taps.size < COUNT) taps.add(t) }
+    /** true only for the add that completes the set (so the summary is written once). */
+    @Synchronized fun add(t: Tap): Boolean { if (taps.size >= COUNT) return false; taps.add(t); return taps.size == COUNT }
     @Synchronized fun all(): List<Tap> = taps.toList()
     @Synchronized fun clear() = taps.clear()
     val done: Boolean get() = all().size >= COUNT
@@ -78,7 +79,7 @@ class TouchPage(private val a: Activity, onBack: () -> Unit) : Page {
     private val ui = Ui(a)
     override val root: LinearLayout
     private val result = ui.label("", 16f, Palette.text, mono = true)
-    private var n = 0
+    private var n = TouchStats.all().size
 
     init {
         val (r, content) = ui.frame("4 · Dokunuş", "Dokunuştan ekrandaki kareye · 20 dokunuş", onBack)
@@ -102,9 +103,9 @@ class TouchPage(private val a: Activity, onBack: () -> Unit) : Page {
             ch.postFrameCallback { f2 ->
                 val t = TouchStats.Tap(no, (handledUptime - eventUptime).toDouble(),
                     f1 / 1e6 - eventUptime, f2 / 1e6 - eventUptime)
-                TouchStats.add(t)
+                val last = TouchStats.add(t)
                 Yol.row(a, "dokunus", "dokunus", "#$no", String.format(Locale.US, "kare %.1f ms · ekran %.1f ms · işleme %.1f ms", t.frameMs, t.shownMs, t.dispatchMs))
-                if (TouchStats.done) Yol.rows(a, "dokunus", "ozet", TouchStats.summary())
+                if (last) Yol.rows(a, "dokunus", "ozet", TouchStats.summary())
                 tick()
             }
         }

@@ -102,6 +102,24 @@ class Kesif09Test {
     }
 
     @Test
+    fun coldOpeningRecordsMarks() {
+        // In tests elapsedRealtime is small, as just after a boot.
+        assertTrue(Acilis.nearBoot())
+        KesifAcilis().onReceive(app, android.content.Intent(android.content.Intent.ACTION_BOOT_COMPLETED))
+        assertTrue(Acilis.active())
+        assertEquals("soğuk", Acilis.kind)
+        Acilis.onAirInfo(sticky = true)
+        Acilis.onAirInfo(sticky = false)
+        val keys = Acilis.marks().map { it.key }
+        // Other tests in this JVM may have added Keşif's own marks; these four must be there, in order.
+        val want = listOf("başlangıç", "sistem hazır", "yapışkan klima yayını (önceki)", "ilk klima yayını")
+        assertEquals(want, keys.filter { it in want })
+        // An unknown action changes nothing.
+        KesifAcilis().onReceive(app, android.content.Intent("biri.baska.sey"))
+        assertEquals(keys, Acilis.marks().map { it.key })
+    }
+
+    @Test
     fun armingIsTimeLimited() {
         Acilis.arm(app)
         assertTrue(Acilis.armed(app))
