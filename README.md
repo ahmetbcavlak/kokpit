@@ -6,7 +6,7 @@ Renault Mégane IV'teki dikey araç ekranı için kendi arayüzümüz.
 
 **[▶ Kokpit Keşif'i indir (APK)](https://github.com/ahmetbcavlak/kokpit/raw/main/dist/kokpit-kesif.apk)**
 
-Sürüm: 0.8.0 · 171 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
+Sürüm: 0.9.0 · 199 KB · 0.4 ve sonrasının üzerine kurulur; 0.2.0 yüklüyse **önce onu kaldır**
 
 0.4.0'dan beri yeni bir imza anahtarı kullanılıyor; 0.2.0'ın üzerine kurulmaz. Ekranda 0.2.0 varsa bir kez:
 
@@ -52,6 +52,19 @@ Ekranın yeni ana arayüzü, ilk sürüm. **Araca hiçbir komut göndermez**; kl
 ## Kokpit Keşif nedir?
 
 Ekranı ve araçtan gelen veriyi tanımak için küçük bir uygulama. **Yalnızca okur, hiçbir ayarı değiştirmez.** Araca giden tek komut "Klima komutu" sayfasındaki dört tuştur (K-117); 0.7'deki kapı penceresi kapatma testi de yalnız düğmeyle çalışır.
+
+### 0.9.0 · Yol haritası ölçümleri (Faz 6, K-133)
+
+Canlı ekrandaki "Yol haritası ölçümleri (6)" düğmesi. Hepsi tek dosyaya yazar: `yol-olcumleri.csv` (iPad: `/yol.csv`). Hiçbir ayar kalıcı değişmez.
+
+1. **İnternet:** ağ türü, Wi-Fi adı (yalnız ad), github.com ve raw.githubusercontent.com için DNS süresi ve HTTPS (HEAD) süresi, HTTP kodu ya da hata. "CarPlay kapalı" ve "CarPlay açık" düğmeleri ölçümü etiketler.
+2. **Güncellemeyi dene:** indirme bağlantısındaki Keşif'i indirir, sürümünü ve imzasını yüklü Keşif'le karşılaştırır; aynı paket, aynı imza ve en az aynı sürümse sistem yükleyicisini açar (yüklemeyi sen onaylarsın). Kurulum izni durumu, ayar ekranına gidiş, yükleyici sonucu ve güncelleme sonrası ilk açılış yazılır. APK, yalnız o dosyayı salt okunur veren küçük bir içerik sağlayıcıyla (FileProvider yerine) verilir.
+3. **Açılış zaman çizelgesi:** "Sonraki açılışları ölç" ile Keşif bildirimle arkada bekler (24 saatte kapanır). Soğuk açılışta çekirdek başlangıcından, sıcak açılışta ekranın yanmasından itibaren: sistem hazır (BOOT_COMPLETED), Keşif süreci ve ilk karesi, Kokpit ve ZLINK penceresinin göründüğü an (erişilebilirlik; Kokpit kendi kaydını paylaşmadığı için pencere, ilk kare değil), ilk GPS konumu, ilk klima yayını. Saatler `elapsedRealtime`.
+4. **Dokunuş:** 20 dokunuşta dokunuş zamanından cevabı çizen kareye ve ekrana çıkan kareye kadar geçen süre; ortalama ve p95.
+5. **Kısa ses:** 300 ms'lik ses; A) USAGE_ASSISTANCE_SONIFICATION + AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK, B) odaksız. Önce, çalarken ve sonra müzik durumu; "kısıldı / durdu / değişmedi / duyulmadı" düğmeleri.
+6. **Parlaklık:** değer ve mod okunur; "Ayarları değiştirme" izni varsa onayla bir kademe kısılır, 3 sn sonra eski değer geri yazılır (Keşif o arada kapanırsa bir sonraki başlangıçta).
+
+Yeni izinler: paket yükleme isteği, ayarları değiştirme (yalnız parlaklık denemesi), açılışta başlama ve ön plan hizmeti (yalnız açılış ölçümü kuruluyken).
 
 ### 0.8.0 · Kapı özellikleri, medya ve bağlantı, klima komutu
 
