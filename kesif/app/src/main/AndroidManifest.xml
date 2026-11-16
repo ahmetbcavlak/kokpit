@@ -10,6 +10,14 @@
     <!-- Keşif 0.8: GPS speed, only for the climate page's "parked" check. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Keşif 0.9: open the system installer for a downloaded Keşif ("Güncellemeyi dene"); the user confirms. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Keşif 0.9: brightness test, only after the user grants it and confirms; the old value is put back. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <!-- Keşif 0.9: opening timeline (armed by the user, 24 h at most). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -60,5 +68,27 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+        <!-- Keşif 0.9: the downloaded APK, read-only, for the system installer only (one-off grant). -->
+        <provider
+            android:name=".ApkSaglayici"
+            android:authorities="dev.kokpit.kesif.apk"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!-- Keşif 0.9: boot time for the opening timeline. Only records a time; starts the measuring
+             service only if the user armed it. -->
+        <receiver android:name=".KesifAcilis" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.ACTION_BOOT_IPO" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".AcilisServisi"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 </manifest>

@@ -70,7 +70,7 @@ class ReportServer(
                 else sendGrowing(out, f, "text/csv; charset=utf-8")
             }
             route == "/rapor" -> send(out, "text/html; charset=utf-8", html(report()))
-            route in setOf("/arayuz.csv", "/servis-arayuzu.txt", "/klima-komutu.csv", "/klima-tuslari.csv", "/kapi.csv", "/medya.csv") -> {
+            route in setOf("/arayuz.csv", "/servis-arayuzu.txt", "/klima-komutu.csv", "/klima-tuslari.csv", "/kapi.csv", "/medya.csv", "/yol.csv") -> {
                 val ctx = PackageExporter.appContext()
                 val f = ctx?.let { when (route) {
                     "/arayuz.csv" -> UiDump.file(it)
@@ -78,6 +78,7 @@ class ReportServer(
                     "/klima-tuslari.csv" -> AirKeys.log.file(it)
                     "/kapi.csv" -> DoorProps.log.file(it)
                     "/medya.csv" -> MediaProbe.log.file(it)
+                    "/yol.csv" -> Yol.log.file(it)
                     else -> ServiceProbe.interfaceFile(it)
                 } }
                 if (f == null || !f.exists()) send(out, "text/plain; charset=utf-8", "Henüz yok", 404)

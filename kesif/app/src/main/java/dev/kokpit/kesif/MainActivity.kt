@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -67,6 +68,10 @@ class MainActivity : Activity() {
         PackageExporter.init(this)
         ServiceProbe.init(this)
         MediaProbe.start(this)
+        // Keşif 0.9: opening timeline, an update finished while Keşif was closed, a brightness test to undo.
+        runCatching { Acilis.onProcessStart(this) }
+        runCatching { Updater.checkAfterStart(this) }
+        runCatching { Brightness.restorePending(this) }
         DeviceInfo.warmUp()
         startServer()
         showLive()
@@ -88,6 +93,18 @@ class MainActivity : Activity() {
         super.onStop()
     }
 
+    override fun onResume() {
+        super.onResume()
+        Acilis.watchFirstFrame()
+    }
+
+    @Deprecated("Activity result API needs AndroidX")
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == Updater.REQUEST) Updater.onResult(this, resultCode, data)
+    }
+
     override fun onDestroy() {
         main.removeCallbacks(ticker)
         server?.stop()
@@ -99,6 +116,7 @@ class MainActivity : Activity() {
             MediaProbe.stop(this)
             GpsGuard.stop(this)
             DoorProps.stopRecording(this) // the 250 ms poll ends with the app
+            if (Brightness.testing) Brightness.restore(this, "Keşif kapandı")
         }
         super.onDestroy()
     }
@@ -142,6 +160,13 @@ class MainActivity : Activity() {
             "kapi" -> DoorPage(this) { showLive() }
             "medya" -> MediaPage(this) { showLive() }
             "klima" -> AirPage(this) { showLive() }
+            "yol" -> YolPage(this, { showLive() }) { showPage(it) }
+            "internet" -> InternetPage(this) { showPage("yol") }
+            "guncelle" -> UpdatePage(this) { showPage("yol") }
+            "acilis" -> AcilisPage(this) { showPage("yol") }
+            "dokunus" -> TouchPage(this) { showPage("yol") }
+            "ses" -> SoundPage(this) { showPage("yol") }
+            "parlaklik" -> BrightnessPage(this) { showPage("yol") }
             else -> return
         }
         showingLive = false

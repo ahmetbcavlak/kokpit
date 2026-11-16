@@ -79,7 +79,10 @@ class PencereGunlugu : AccessibilityService() {
         try {
             when (e.eventType) {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                    if (e.packageName?.toString() != WindowLog.PKG) return
+                    val pkg = e.packageName?.toString().orEmpty()
+                    // Keşif 0.9 opening timeline: only the time a Kokpit or ZLINK window appeared, nothing else.
+                    if (pkg == Acilis.KOKPIT || pkg.contains("zlink", true)) Acilis.onWindow(pkg, e.eventTime)
+                    if (pkg != WindowLog.PKG) return
                     // The event object is recycled after this call; copy what is needed first.
                     val at = wallTime(e)
                     val cls = e.className?.toString().orEmpty()

@@ -148,6 +148,9 @@ class LiveScreen(private val a: Activity, private val onReport: () -> Unit, priv
             }
             content.addView(this, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(10) })
         }
+        // ---- Keşif 0.9: roadmap measurements ----
+        content.addView(button("Yol haritası ölçümleri (6)", primary = false, size = 17f) { onPage("yol") },
+            LinearLayout.LayoutParams(MATCH_PARENT, dp(60)).apply { bottomMargin = dp(10) })
 
         // ---- cards ----
         content.addView(label("Gri: veri yok · Kehribar: değer var ama bu oturumda değişmedi, eski olabilir · Yeşil: değişti. Sen bir şey yapınca yeşile dönüyorsa veri canlı. İşarete dokunmak kaydı da başlatır.", 13f, Palette.faint)
